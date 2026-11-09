@@ -2,3 +2,7 @@
 *.zip
 work/
 snapshots/
+.tools/
+.agents/
+skills-lock.json
+newapp/*.png

@@ -26,7 +26,14 @@
 /mnt/data/Code/8BP/newapp/build/classes/com/poollens/app/ControlPanel$13.class
 /mnt/data/Code/8BP/newapp/build/classes/com/poollens/app/ControlPanel$14.class
 /mnt/data/Code/8BP/newapp/build/classes/com/poollens/app/ControlPanel$15.class
+/mnt/data/Code/8BP/newapp/build/classes/com/poollens/app/ControlPanel$16.class
+/mnt/data/Code/8BP/newapp/build/classes/com/poollens/app/ControlPanel$17.class
+/mnt/data/Code/8BP/newapp/build/classes/com/poollens/app/ControlPanel$18.class
+/mnt/data/Code/8BP/newapp/build/classes/com/poollens/app/ControlPanel$19.class
 /mnt/data/Code/8BP/newapp/build/classes/com/poollens/app/ControlPanel.class
+/mnt/data/Code/8BP/newapp/build/classes/com/poollens/app/GuideOverlay$1.class
+/mnt/data/Code/8BP/newapp/build/classes/com/poollens/app/GuideOverlay$2.class
+/mnt/data/Code/8BP/newapp/build/classes/com/poollens/app/GuideOverlay$3.class
 /mnt/data/Code/8BP/newapp/build/classes/com/poollens/app/GuideOverlay$CanvasView.class
 /mnt/data/Code/8BP/newapp/build/classes/com/poollens/app/GuideOverlay.class
 /mnt/data/Code/8BP/newapp/build/classes/com/poollens/app/Detector$Ball.class
