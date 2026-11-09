@@ -380,46 +380,26 @@ public class OverlayService extends Service implements CaptureEngine.Frames {
             // accept a new angle once it has settled.
             long t = System.currentTimeMillis();
             if (r.aimFound) {
-                // Two near-white lines compete: the dashed guideline and the
-                // wooden cue stick. When the guideline fades the detected angle
-                // can jump tens of degrees between frames. At 14 Hz a real drag
-                // never sweeps that far, so treat a big jump as a mis-detection
-                // unless the new line scores clearly better.
-                boolean prevRecent = lastAimMs != 0 && t - lastAimMs < 2000
-                        && lastCue != null && r.cue != null
-                        && Math.hypot(r.cue.x - lastCue.x, r.cue.y - lastCue.y) < 60;
-                if (prevRecent) {
-                    float delta = Math.abs(normDeg(
-                            (float) Math.toDegrees(r.aimAngle - lastAimAngle)));
-                    if (delta > 18f) {
-                        r.aimAngle = lastAimAngle;
-                        r.aimScore = lastAimScore;
-                    }
-                }
                 lastAimAngle = r.aimAngle;
                 lastAimScore = r.aimScore;
                 lastAimMs = t;
 
-                if (r.aimTarget != null) {
-                    if (prevRecent && !Float.isNaN(lastTargetAngle) && !Float.isNaN(r.targetAngle)) {
-                        float dTarget = Math.abs(normDeg(
-                                (float) Math.toDegrees(r.targetAngle - lastTargetAngle)));
-                        if (dTarget > 20f) {
-                            // Wild target jump while cue is stationary: hold settled target!
-                            r.targetAngle = lastTargetAngle;
-                            r.stubTipX = lastStubTipX;
-                            r.stubTipY = lastStubTipY;
-                        }
-                    }
-                    lastAimTarget = r.aimTarget;
-                    lastTargetAngle = r.targetAngle;
-                    lastGhostX = r.ghostX;
-                    lastGhostY = r.ghostY;
-                    lastStubTipX = r.stubTipX;
-                    lastStubTipY = r.stubTipY;
-                    lastCueReboundAngle = r.cueReboundAngle;
-                } else if (prevRecent && lastAimTarget != null) {
-                    // Momentary pulse dip: restore previous target!
+                lastAimTarget = r.aimTarget;
+                lastTargetAngle = r.targetAngle;
+                lastGhostX = r.ghostX;
+                lastGhostY = r.ghostY;
+                lastStubTipX = r.stubTipX;
+                lastStubTipY = r.stubTipY;
+                lastCueReboundAngle = r.cueReboundAngle;
+            } else if (lastAimMs != 0 && t - lastAimMs < 500 && lastCue != null) {
+                // Momentary 1-frame guideline pulse hold (500ms max)
+                if (r.cue == null) {
+                    r.cue = lastCue;
+                }
+                if (Math.hypot(r.cue.x - lastCue.x, r.cue.y - lastCue.y) < 60) {
+                    r.aimAngle = lastAimAngle;
+                    r.aimScore = lastAimScore;
+                    r.aimFound = true;
                     r.aimTarget = lastAimTarget;
                     r.targetAngle = lastTargetAngle;
                     r.ghostX = lastGhostX;
@@ -428,28 +408,8 @@ public class OverlayService extends Service implements CaptureEngine.Frames {
                     r.stubTipY = lastStubTipY;
                     r.cueReboundAngle = lastCueReboundAngle;
                 }
-            } else if (lastAimMs != 0 && t - lastAimMs < 1200 && lastCue != null) {
-                // If cue was momentarily missed (e.g. shadowed or during cue animation), restore last cue
-                if (r.cue == null) {
-                    r.cue = lastCue;
-                }
-                if (Math.hypot(r.cue.x - lastCue.x, r.cue.y - lastCue.y) < 60) {
-                    // Reuse the recent angle and target rather than blinking off
-                    r.aimAngle = lastAimAngle;
-                    r.aimScore = lastAimScore;
-                    r.aimFound = true;
-                    if (lastAimTarget != null) {
-                        r.aimTarget = lastAimTarget;
-                        r.targetAngle = lastTargetAngle;
-                        r.ghostX = lastGhostX;
-                        r.ghostY = lastGhostY;
-                        r.stubTipX = lastStubTipX;
-                        r.stubTipY = lastStubTipY;
-                        r.cueReboundAngle = lastCueReboundAngle;
-                    }
-                }
             } else {
-                // Aim session ended: clear stale target/ghost so they never leak into idle state
+                lastAimMs = 0;
                 lastAimTarget = null;
                 lastTargetAngle = Float.NaN;
                 lastGhostX = Float.NaN;

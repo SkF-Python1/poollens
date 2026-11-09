@@ -59,17 +59,21 @@ final class AimLine {
 
             if (dx > 1e-9) {
                 tx = (r - x) / dx;
-                wall = 1; // right
+                if (tx <= 0.05) tx = Double.MAX_VALUE; // ignore wall we are already touching
+                else wall = 1; // right
             } else if (dx < -1e-9) {
                 tx = (l - x) / dx;
-                wall = 2; // left
+                if (tx <= 0.05) tx = Double.MAX_VALUE;
+                else wall = 2; // left
             }
             if (dy > 1e-9) {
                 ty = (b - y) / dy;
-                wall = 3; // bottom
+                if (ty <= 0.05) ty = Double.MAX_VALUE;
+                else if (ty < tx) wall = 3; // bottom
             } else if (dy < -1e-9) {
                 ty = (t - y) / dy;
-                wall = 4; // top
+                if (ty <= 0.05) ty = Double.MAX_VALUE;
+                else if (ty < tx) wall = 4; // top
             }
 
             double dist;

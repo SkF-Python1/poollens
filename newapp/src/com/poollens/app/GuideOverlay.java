@@ -182,7 +182,7 @@ class GuideOverlay {
         private float lastStubTipX = Float.NaN;
         private float lastStubTipY = Float.NaN;
         private Detector.Ball lastTarget = null;
-        private static final int AIM_HOLD = 60;
+        private static final int AIM_HOLD = 6;
         private int holdCounter;
         private Detector.Result heldResult;
 
@@ -251,33 +251,28 @@ class GuideOverlay {
                     Detector.Result copy = raw.copy();
                     copy.aimAngle = smoothAimAngle;
 
-                    // Target angle smoothing & stability filter:
+                    // Target angle: switch targets immediately, gentle deadband for micro-jitter
                     if (copy.aimTarget != null && !Float.isNaN(copy.targetAngle)) {
-                        if (!Float.isNaN(smoothTargetAngle)) {
+                        if (!Float.isNaN(smoothTargetAngle) && lastTarget != null
+                                && Math.hypot(copy.aimTarget.x - lastTarget.x, copy.aimTarget.y - lastTarget.y) < 20) {
                             float dTarget = angleDelta(copy.targetAngle, smoothTargetAngle);
-                            // If target jumps wildly (> 20 deg) while cue is stationary, reject the jitter
-                            if (Math.abs(dTarget) > 0.35f) {
+                            if (Math.abs(dTarget) < 0.003f) {
                                 copy.targetAngle = smoothTargetAngle;
-                                copy.stubTipX = lastStubTipX;
-                                copy.stubTipY = lastStubTipY;
                             } else {
-                                smoothTargetAngle += dTarget * 0.40f;
+                                smoothTargetAngle += dTarget * 0.45f;
                                 copy.targetAngle = smoothTargetAngle;
-                                lastStubTipX = copy.stubTipX;
-                                lastStubTipY = copy.stubTipY;
                             }
                         } else {
                             smoothTargetAngle = copy.targetAngle;
-                            lastStubTipX = copy.stubTipX;
-                            lastStubTipY = copy.stubTipY;
+                            lastTarget = copy.aimTarget;
                         }
-                        lastTarget = copy.aimTarget;
-                    } else if (lastTarget != null && !Float.isNaN(smoothTargetAngle)) {
-                        // Momentary pulse: hold the last good target ball rather than dropping it
-                        copy.aimTarget = lastTarget;
-                        copy.targetAngle = smoothTargetAngle;
-                        copy.stubTipX = lastStubTipX;
-                        copy.stubTipY = lastStubTipY;
+                        lastStubTipX = copy.stubTipX;
+                        lastStubTipY = copy.stubTipY;
+                    } else {
+                        smoothTargetAngle = Float.NaN;
+                        lastTarget = null;
+                        lastStubTipX = Float.NaN;
+                        lastStubTipY = Float.NaN;
                     }
 
                     heldResult  = copy;
@@ -361,7 +356,7 @@ class GuideOverlay {
 
             // CYAN kick (no target)
             if (showCyan && !hasTarget && bankCount > 0) {
-                runAndPaint(c, linePaint, segs, cueX, cueY, r.aimAngle, cueR,
+                runAndPaint(c, linePaint, segs, cueX, cueY, r.aimAngle, 0f,
                         tL, tT, tR, tB, 0xEE7FD4FF, thickAim ? BANK_W_THICK : BANK_W, bankCount);
             }
 
@@ -466,7 +461,7 @@ class GuideOverlay {
                 ang = r.aimAngle;
             }
 
-            int n = runAndPaint(c, linePaint, objSegs, startX, startY, ang, cueR,
+            int n = runAndPaint(c, linePaint, objSegs, startX, startY, ang, 0f,
                     tL, tT, tR, tB, 0xFFFFC020, thickAim ? OBJ_W_THICK : OBJ_W, bankCount);
 
             drawArrowHead(c, n);
@@ -498,7 +493,7 @@ class GuideOverlay {
                 }
             }
             if (!Float.isNaN(qAng)) {
-                runAndPaint(c, linePaint, segs, ghostX, ghostY, qAng, cueR,
+                runAndPaint(c, linePaint, segs, ghostX, ghostY, qAng, 0f,
                         tL, tT, tR, tB, 0xCC66E0FF, thickAim ? OBJ_W_THICK : OBJ_W, bankCount);
             }
         }
