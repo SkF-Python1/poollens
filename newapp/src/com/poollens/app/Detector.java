@@ -772,7 +772,7 @@ final class Detector {
 
         for (int a = 0; a < 360; a++) {
             float dInc = Math.abs((a - incDeg + 180f) % 360f - 180f);
-            if (dInc < 28f) continue; // Skip incoming cue line
+            if (dInc < 42f) continue; // Skip incoming cue line and cue stick cone
 
             double th = Math.toRadians(a);
             float cdx = (float) Math.cos(th);
@@ -800,20 +800,30 @@ final class Detector {
             rayMaxD[a] = maxHitD;
         }
 
+        // Smooth rayHits to remove plateaus and noise
+        float[] smoothHits = new float[360];
+        for (int a = 0; a < 360; a++) {
+            int prev = (a + 359) % 360;
+            int next = (a + 1) % 360;
+            smoothHits[a] = (rayHits[prev] + rayHits[a] * 2f + rayHits[next]) * 0.25f;
+        }
+
         // Find candidate peaks
         int bestTargetA = -1;
-        int bestTargetHits = 0;
+        float bestTargetHits = 0f;
         float bestTargetMaxD = 0f;
 
         int bestReboundA = -1;
-        int bestReboundHits = 0;
+        float bestReboundHits = 0f;
         float bestReboundMaxD = 0f;
 
+        final float minTargetReach = r * 2.3f;
+
         for (int a = 0; a < 360; a++) {
-            int hPrev = rayHits[(a + 359) % 360];
-            int hCur = rayHits[a];
-            int hNext = rayHits[(a + 1) % 360];
-            if (hCur < 8 || hCur < hPrev || hCur < hNext) continue;
+            int prev = (a + 359) % 360;
+            int next = (a + 1) % 360;
+            float hCur = smoothHits[a];
+            if (hCur < 6f || hCur < smoothHits[prev] || hCur <= smoothHits[next]) continue;
 
             if (rayInner[a] >= 4) {
                 // Cue rebound line starts inside / at ghost ring
@@ -822,8 +832,8 @@ final class Detector {
                     bestReboundA = a;
                     bestReboundMaxD = rayMaxD[a];
                 }
-            } else {
-                // Target stub line starts outside target ball
+            } else if (rayMaxD[a] >= minTargetReach) {
+                // Target stub line must extend past the target ball surface
                 if (hCur > bestTargetHits) {
                     bestTargetHits = hCur;
                     bestTargetA = a;
@@ -833,97 +843,23 @@ final class Detector {
         }
 
         // If target stub was found:
-        if (bestTargetA >= 0 && bestTargetHits >= 8) {
-            // Refine stub angle and tip using PCA on guide pixels near the outermost tip
-            // (excludes ball highlight/specular reflections closer to the ball center)
-            float stubMinD = Math.max(r * 2.0f, bestTargetMaxD - Math.max(12f, r * 0.9f));
-            float stubSumX = 0f, stubSumY = 0f;
-            int stubCount = 0;
+        if (bestTargetA >= 0 && bestTargetHits >= 7f) {
+            float th = (float) Math.toRadians(bestTargetA);
+            float dx = (float) Math.cos(th);
+            float dy = (float) Math.sin(th);
 
-            if (stubPtsX.length < 256) {
-                stubPtsX = new float[256];
-                stubPtsY = new float[256];
-            }
-
-            int scanBox = Math.round(bestTargetMaxD + 2f);
-            for (int dyB = -scanBox; dyB <= scanBox; dyB++) {
-                for (int dxB = -scanBox; dxB <= scanBox; dxB++) {
-                    float d = (float) Math.hypot(dxB, dyB);
-                    if (d < stubMinD || d > bestTargetMaxD + 2f) continue;
-                    float angDeg = (float) Math.toDegrees(Math.atan2(dyB, dxB));
-                    if (angDeg < 0f) angDeg += 360f;
-                    float dAng = Math.abs((angDeg - bestTargetA + 180f) % 360f - 180f);
-                    if (dAng > 14f) continue;
-
-                    int px = (int) (gx + dxB);
-                    int py = (int) (gy + dyB);
-                    if (px < 1 || py < 1 || px >= w - 1 || py >= h - 1) continue;
-                    if (InkMask.isInk(px, py)) continue;
-                    if (isGuidePixel(rgba[py * w + px])) {
-                        if (stubCount < stubPtsX.length) {
-                            stubPtsX[stubCount] = px;
-                            stubPtsY[stubCount] = py;
-                            stubSumX += px;
-                            stubSumY += py;
-                            stubCount++;
-                        }
-                    }
-                }
-            }
-
-            if (stubCount >= 6) {
-                float mx = stubSumX / stubCount;
-                float my = stubSumY / stubCount;
-                float sxx = 0f, syy = 0f, sxy = 0f;
-                for (int i = 0; i < stubCount; i++) {
-                    float ox = stubPtsX[i] - mx;
-                    float oy = stubPtsY[i] - my;
-                    sxx += ox * ox;
-                    syy += oy * oy;
-                    sxy += ox * oy;
-                }
-                float stubTh = 0.5f * (float) Math.atan2(2f * sxy, sxx - syy);
-                float sdx = (float) Math.cos(stubTh);
-                float sdy = (float) Math.sin(stubTh);
-                if (sdx * (mx - gx) + sdy * (my - gy) < 0f) {
-                    stubTh += (float) Math.PI;
-                    sdx = -sdx;
-                    sdy = -sdy;
-                }
-                out.targetAngle = stubTh;
-
-                // Outermost tip along principal axis:
-                float maxProj = -Float.MAX_VALUE;
-                float tipX = mx, tipY = my;
-                for (int i = 0; i < stubCount; i++) {
-                    float proj = (stubPtsX[i] - mx) * sdx + (stubPtsY[i] - my) * sdy;
-                    if (proj > maxProj) {
-                        maxProj = proj;
-                        tipX = stubPtsX[i];
-                        tipY = stubPtsY[i];
-                    }
-                }
-                out.stubTipX = tipX;
-                out.stubTipY = tipY;
-            } else {
-                float th = (float) Math.toRadians(bestTargetA);
-                float dx = (float) Math.cos(th);
-                float dy = (float) Math.sin(th);
-                out.targetAngle = th;
-                out.stubTipX = gx + dx * bestTargetMaxD;
-                out.stubTipY = gy + dy * bestTargetMaxD;
-            }
+            out.targetAngle = th;
+            out.stubTipX = gx + dx * bestTargetMaxD;
+            out.stubTipY = gy + dy * bestTargetMaxD;
 
             // Target ball center lies along targetAngle at distance 2*r from ghost
-            float tdx = (float) Math.cos(out.targetAngle);
-            float tdy = (float) Math.sin(out.targetAngle);
-            float tx = gx + tdx * (2.0f * r);
-            float ty = gy + tdy * (2.0f * r);
+            float tx = gx + dx * (2.0f * r);
+            float ty = gy + dy * (2.0f * r);
             out.aimTarget = new Ball(Math.round(tx), Math.round(ty), Math.round(r));
         }
 
         // If cue rebound line was found:
-        if (bestReboundA >= 0 && bestReboundHits >= 8) {
+        if (bestReboundA >= 0 && bestReboundHits >= 7f) {
             out.cueReboundAngle = (float) Math.toRadians(bestReboundA);
         } else if (bestTargetA >= 0) {
             // Geometric fallback for cue rebound if game stub is short/hidden

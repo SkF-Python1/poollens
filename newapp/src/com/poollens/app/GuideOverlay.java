@@ -176,9 +176,13 @@ class GuideOverlay {
         private final Paint dotPaint  = new Paint(Paint.ANTI_ALIAS_FLAG);
         private final Paint dbgPaint  = new Paint(Paint.ANTI_ALIAS_FLAG);
 
-        /** Smooth-hold for the aim angle. */
+        /** Smooth-hold for the aim and target angles. */
         private float smoothAimAngle = Float.NaN;
-        private static final int AIM_HOLD = 8;
+        private float smoothTargetAngle = Float.NaN;
+        private float lastStubTipX = Float.NaN;
+        private float lastStubTipY = Float.NaN;
+        private Detector.Ball lastTarget = null;
+        private static final int AIM_HOLD = 14;
         private int holdCounter;
         private Detector.Result heldResult;
 
@@ -207,6 +211,9 @@ class GuideOverlay {
             if (!enabled) {
                 heldResult  = null;
                 holdCounter = 0;
+                smoothAimAngle = Float.NaN;
+                smoothTargetAngle = Float.NaN;
+                lastTarget = null;
                 return;
             }
 
@@ -214,6 +221,9 @@ class GuideOverlay {
             if (raw == null || !raw.tableFound) {
                 heldResult  = null;
                 holdCounter = 0;
+                smoothAimAngle = Float.NaN;
+                smoothTargetAngle = Float.NaN;
+                lastTarget = null;
                 return;
             }
 
@@ -222,12 +232,42 @@ class GuideOverlay {
             if (raw.aimFound && raw.cue != null && !Float.isNaN(raw.aimAngle)) {
                 if (!Float.isNaN(smoothAimAngle)) {
                     float delta = angleDelta(raw.aimAngle, smoothAimAngle);
-                    smoothAimAngle += delta * (Math.abs(delta) < 0.12f ? 0.5f : 1f);
+                    smoothAimAngle += delta * (Math.abs(delta) < 0.12f ? 0.4f : 1f);
                 } else {
                     smoothAimAngle = raw.aimAngle;
                 }
                 Detector.Result copy = raw.copy();
                 copy.aimAngle = smoothAimAngle;
+
+                // Target angle smoothing & stability filter:
+                if (copy.aimTarget != null && !Float.isNaN(copy.targetAngle)) {
+                    if (!Float.isNaN(smoothTargetAngle)) {
+                        float dTarget = angleDelta(copy.targetAngle, smoothTargetAngle);
+                        // If target jumps wildly (> 20 deg) while cue is stationary, reject the jitter
+                        if (Math.abs(dTarget) > 0.35f) {
+                            copy.targetAngle = smoothTargetAngle;
+                            copy.stubTipX = lastStubTipX;
+                            copy.stubTipY = lastStubTipY;
+                        } else {
+                            smoothTargetAngle += dTarget * 0.40f;
+                            copy.targetAngle = smoothTargetAngle;
+                            lastStubTipX = copy.stubTipX;
+                            lastStubTipY = copy.stubTipY;
+                        }
+                    } else {
+                        smoothTargetAngle = copy.targetAngle;
+                        lastStubTipX = copy.stubTipX;
+                        lastStubTipY = copy.stubTipY;
+                    }
+                    lastTarget = copy.aimTarget;
+                } else if (lastTarget != null && !Float.isNaN(smoothTargetAngle)) {
+                    // Momentary pulse: hold the last good target ball rather than dropping it
+                    copy.aimTarget = lastTarget;
+                    copy.targetAngle = smoothTargetAngle;
+                    copy.stubTipX = lastStubTipX;
+                    copy.stubTipY = lastStubTipY;
+                }
+
                 heldResult  = copy;
                 holdCounter = AIM_HOLD;
                 r = heldResult;
@@ -236,6 +276,8 @@ class GuideOverlay {
                 r = heldResult;
             } else {
                 smoothAimAngle = Float.NaN;
+                smoothTargetAngle = Float.NaN;
+                lastTarget = null;
                 heldResult  = null;
             }
 

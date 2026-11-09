@@ -245,6 +245,11 @@ public class OverlayService extends Service implements CaptureEngine.Frames {
     private int lastAimScore;
     private long lastAimMs;
     private Detector.Ball lastCue;
+    private float lastTargetAngle = Float.NaN;
+    private Detector.Ball lastAimTarget = null;
+    private float lastGhostX = Float.NaN, lastGhostY = Float.NaN;
+    private float lastStubTipX = Float.NaN, lastStubTipY = Float.NaN;
+    private float lastCueReboundAngle = Float.NaN;
     private int lastRotation = -1;
 
     @Override
@@ -386,11 +391,6 @@ public class OverlayService extends Service implements CaptureEngine.Frames {
                 if (prevRecent) {
                     float delta = Math.abs(normDeg(
                             (float) Math.toDegrees(r.aimAngle - lastAimAngle)));
-                    // The dashed guideline and the wooden cue stick are both
-                    // near-white and sit tens of degrees apart, so when the
-                    // guideline fades the detected angle jumps. At ~14 Hz a real
-                    // drag never sweeps that far: hold the settled angle
-                    // instead of flickering between the two candidates.
                     if (delta > 18f) {
                         r.aimAngle = lastAimAngle;
                         r.aimScore = lastAimScore;
@@ -399,6 +399,35 @@ public class OverlayService extends Service implements CaptureEngine.Frames {
                 lastAimAngle = r.aimAngle;
                 lastAimScore = r.aimScore;
                 lastAimMs = t;
+
+                if (r.aimTarget != null) {
+                    if (prevRecent && !Float.isNaN(lastTargetAngle) && !Float.isNaN(r.targetAngle)) {
+                        float dTarget = Math.abs(normDeg(
+                                (float) Math.toDegrees(r.targetAngle - lastTargetAngle)));
+                        if (dTarget > 20f) {
+                            // Wild target jump while cue is stationary: hold settled target!
+                            r.targetAngle = lastTargetAngle;
+                            r.stubTipX = lastStubTipX;
+                            r.stubTipY = lastStubTipY;
+                        }
+                    }
+                    lastAimTarget = r.aimTarget;
+                    lastTargetAngle = r.targetAngle;
+                    lastGhostX = r.ghostX;
+                    lastGhostY = r.ghostY;
+                    lastStubTipX = r.stubTipX;
+                    lastStubTipY = r.stubTipY;
+                    lastCueReboundAngle = r.cueReboundAngle;
+                } else if (prevRecent && lastAimTarget != null) {
+                    // Momentary pulse dip: restore previous target!
+                    r.aimTarget = lastAimTarget;
+                    r.targetAngle = lastTargetAngle;
+                    r.ghostX = lastGhostX;
+                    r.ghostY = lastGhostY;
+                    r.stubTipX = lastStubTipX;
+                    r.stubTipY = lastStubTipY;
+                    r.cueReboundAngle = lastCueReboundAngle;
+                }
             } else if (lastAimMs != 0 && t - lastAimMs < 1200 && lastCue != null
                     && r.cue != null
                     && Math.hypot(r.cue.x - lastCue.x, r.cue.y - lastCue.y) < 60) {
@@ -407,6 +436,15 @@ public class OverlayService extends Service implements CaptureEngine.Frames {
                 r.aimAngle = lastAimAngle;
                 r.aimScore = lastAimScore;
                 r.aimFound = true;
+                if (lastAimTarget != null) {
+                    r.aimTarget = lastAimTarget;
+                    r.targetAngle = lastTargetAngle;
+                    r.ghostX = lastGhostX;
+                    r.ghostY = lastGhostY;
+                    r.stubTipX = lastStubTipX;
+                    r.stubTipY = lastStubTipY;
+                    r.cueReboundAngle = lastCueReboundAngle;
+                }
             }
             if (r.cue != null) lastCue = r.cue;
 
