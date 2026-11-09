@@ -1,6 +1,7 @@
 package com.poollens.app;
 
 import android.content.Context;
+import android.content.SharedPreferences;
 import android.graphics.PixelFormat;
 import android.graphics.drawable.GradientDrawable;
 import android.os.Build;
@@ -11,29 +12,27 @@ import android.view.Gravity;
 import android.view.MotionEvent;
 import android.view.View;
 import android.view.WindowManager;
+import android.widget.FrameLayout;
 import android.widget.LinearLayout;
 import android.widget.TextView;
 
 /**
- * Compact control toolbar.
- *
- * A flat toolbar of small buttons in two short rows, parked in the HUD strip
- * above the cushion line, where it covers no cloth. Nothing redraws unless a
- * label actually changes.
- *
- * The border / ball / pocket buttons and the manual border editor were removed
- * along with those overlay layers, so the rows now hold only the shot-line
- * controls.
+ * Compact control toolbar with Floating Bubble & Auto-Hide HUD modes.
  */
 class ControlPanel {
 
     private static final String TAG = "PoolLens";
+    private static final String PREF_NAME = "poollens_prefs";
+    private static final String KEY_AUTOHIDE = "panel_autohide";
 
     private final Context ctx;
     private final WindowManager wm;
     private final Handler main = new Handler(Looper.getMainLooper());
 
     private LinearLayout panel;
+    private LinearLayout toolbarLayout;
+    private FrameLayout bubbleView;
+    private GradientDrawable panelBg;
     private LinearLayout rowA;
     private LinearLayout rowB;
     private WindowManager.LayoutParams lp;
@@ -45,13 +44,15 @@ class ControlPanel {
     private TextView whiteButton;
     private TextView bankButton;
     private TextView widthButton;
+    private TextView autohideButton;
     private TextView editButton;
     private TextView resetButton;
     private TextView statusText;
     private TextView title;
     private TextView minButton;
 
-    private boolean collapsed;
+    private boolean bubbleMode;
+    private boolean autoHide;
     private boolean shown;
     private GuideOverlay guide;
 
@@ -66,6 +67,8 @@ class ControlPanel {
     ControlPanel(Context ctx) {
         this.ctx = ctx.getApplicationContext();
         this.wm = (WindowManager) this.ctx.getSystemService(Context.WINDOW_SERVICE);
+        SharedPreferences prefs = this.ctx.getSharedPreferences(PREF_NAME, Context.MODE_PRIVATE);
+        this.autoHide = prefs.getBoolean(KEY_AUTOHIDE, false);
     }
 
     void setGuide(GuideOverlay g) {
@@ -169,13 +172,16 @@ class ControlPanel {
         box.setOrientation(LinearLayout.VERTICAL);
         box.setPadding(dp(8), dp(5), dp(8), dp(7));
 
-        GradientDrawable bg = new GradientDrawable();
-        bg.setColor(0xE6141A20);
-        bg.setCornerRadius(dp(10));
-        bg.setStroke(dp(1), 0xFF3DDC97);
-        box.setBackground(bg);
+        panelBg = new GradientDrawable();
+        panelBg.setColor(0xE6141A20);
+        panelBg.setCornerRadius(dp(10));
+        panelBg.setStroke(dp(1), 0xFF3DDC97);
+        box.setBackground(panelBg);
 
-        // Header: drag handle, status, collapse toggle.
+        toolbarLayout = new LinearLayout(ctx);
+        toolbarLayout.setOrientation(LinearLayout.VERTICAL);
+
+        // Header: drag handle, status, collapse to bubble toggle.
         LinearLayout header = new LinearLayout(ctx);
         header.setOrientation(LinearLayout.HORIZONTAL);
         header.setGravity(Gravity.CENTER_VERTICAL);
@@ -198,27 +204,27 @@ class ControlPanel {
         minButton = new TextView(ctx);
         minButton.setText("\u2212");
         minButton.setTextColor(0xFF3DDC97);
-        minButton.setTextSize(15);
+        minButton.setTextSize(16);
         minButton.setPadding(dp(12), 0, dp(4), 0);
         minButton.setOnClickListener(new View.OnClickListener() {
             @Override
             public void onClick(View v) {
-                setCollapsed(!collapsed);
+                setBubbleMode(true);
             }
         });
         header.addView(minButton);
 
-        box.addView(header);
-        installDrag(title);
-        installDrag(statusText);
+        toolbarLayout.addView(header);
+        installDrag(title, false);
+        installDrag(statusText, false);
 
         rowA = new LinearLayout(ctx);
         rowA.setOrientation(LinearLayout.HORIZONTAL);
-        box.addView(rowA);
+        toolbarLayout.addView(rowA);
 
         rowB = new LinearLayout(ctx);
         rowB.setOrientation(LinearLayout.HORIZONTAL);
-        box.addView(rowB);
+        toolbarLayout.addView(rowB);
 
         guideButton = addButton(rowA, new Runnable() {
             @Override
@@ -277,6 +283,17 @@ class ControlPanel {
             }
         });
 
+        autohideButton = addButton(rowB, new Runnable() {
+            @Override
+            public void run() {
+                autoHide = !autoHide;
+                SharedPreferences p = ctx.getSharedPreferences(PREF_NAME, Context.MODE_PRIVATE);
+                p.edit().putBoolean(KEY_AUTOHIDE, autoHide).apply();
+                if (!autoHide && panel != null) panel.setAlpha(1.0f);
+                refreshLabels();
+            }
+        });
+
         editButton = addButton(rowB, new Runnable() {
             @Override
             public void run() {
@@ -307,19 +324,52 @@ class ControlPanel {
         });
         stop.setText("STOP");
 
+        box.addView(toolbarLayout);
+
+        // Compact Floating Bubble View (42dp circle badge)
+        bubbleView = new FrameLayout(ctx);
+        int bSize = dp(42);
+        LinearLayout.LayoutParams bLp = new LinearLayout.LayoutParams(bSize, bSize);
+        bubbleView.setLayoutParams(bLp);
+
+        GradientDrawable bBg = new GradientDrawable();
+        bBg.setShape(GradientDrawable.OVAL);
+        bBg.setColor(0xF0141A20);
+        bBg.setStroke(dp(2), 0xFF3DDC97);
+        bubbleView.setBackground(bBg);
+
+        TextView bIcon = new TextView(ctx);
+        bIcon.setText("8");
+        bIcon.setTextSize(17);
+        bIcon.setTypeface(null, android.graphics.Typeface.BOLD);
+        bIcon.setTextColor(0xFF3DDC97);
+        bIcon.setGravity(Gravity.CENTER);
+        FrameLayout.LayoutParams iLp = new FrameLayout.LayoutParams(
+                FrameLayout.LayoutParams.MATCH_PARENT, FrameLayout.LayoutParams.MATCH_PARENT);
+        iLp.gravity = Gravity.CENTER;
+        bubbleView.addView(bIcon, iLp);
+
+        bubbleView.setVisibility(View.GONE);
+        installDrag(bubbleView, true);
+        box.addView(bubbleView);
+
         return box;
     }
 
-    /** Collapses the panel to just its header, or expands it again. */
-    private void setCollapsed(boolean on) {
-        collapsed = on;
-        if (minButton != null) minButton.setText(on ? "+" : "\u2212");
-        if (rowA != null) rowA.setVisibility(on ? View.GONE : View.VISIBLE);
-        if (rowB != null) rowB.setVisibility(on ? View.GONE : View.VISIBLE);
-        updateStatus();
-        LinearLayout p = panel;
-        if (p != null) {
-            p.post(new Runnable() {
+    /** Switches between full toolbar mode and compact floating 8-ball bubble. */
+    private void setBubbleMode(boolean on) {
+        bubbleMode = on;
+        if (toolbarLayout != null) toolbarLayout.setVisibility(on ? View.GONE : View.VISIBLE);
+        if (bubbleView != null) bubbleView.setVisibility(on ? View.VISIBLE : View.GONE);
+        if (panel != null) {
+            if (on) {
+                panel.setBackground(null);
+                panel.setPadding(0, 0, 0, 0);
+            } else {
+                panel.setBackground(panelBg);
+                panel.setPadding(dp(8), dp(5), dp(8), dp(7));
+            }
+            panel.post(new Runnable() {
                 @Override
                 public void run() {
                     publishRect();
@@ -375,6 +425,8 @@ class ControlPanel {
                 set(bankButton, "BANKS", String.valueOf(g.bankCount()), 0xFFBFD3E3);
                 set(widthButton, "WIDTH", g.thickAimOn() ? "THICK" : "THIN",
                         0xFFBFD3E3);
+                set(autohideButton, "AUTOHIDE", autoHide ? "ON" : "OFF",
+                        autoHide ? 0xFF3DDC97 : 0xFF7C8B99);
 
                 if (editButton != null) {
                     if (g.isCalibrating()) {
@@ -401,12 +453,15 @@ class ControlPanel {
 
     // ---------------------------------------------------------------- dragging
 
-    /** Lets the header move the whole panel. */
-    private void installDrag(View handle) {
+    /** Lets the header or floating bubble move the whole panel. */
+    private void installDrag(View handle, final boolean isBubble) {
         if (handle == null) return;
         handle.setOnTouchListener(new View.OnTouchListener() {
             @Override
             public boolean onTouch(View v, MotionEvent e) {
+                if (panel != null && panel.getAlpha() < 0.95f) {
+                    panel.setAlpha(1.0f);
+                }
                 switch (e.getActionMasked()) {
                     case MotionEvent.ACTION_DOWN:
                         startX = lp.x;
@@ -432,6 +487,13 @@ class ControlPanel {
                     }
 
                     case MotionEvent.ACTION_UP:
+                        publishRect();
+                        if (!moved && isBubble) {
+                            setBubbleMode(false);
+                            return true;
+                        }
+                        return moved;
+
                     case MotionEvent.ACTION_CANCEL:
                         publishRect();
                         return moved;
@@ -476,13 +538,23 @@ class ControlPanel {
                 aimValue = aim;
                 aimScoreValue = score;
                 updateStatus();
+
+                if (autoHide && panel != null) {
+                    if (aim) {
+                        panel.animate().alpha(0.10f).setDuration(120).start();
+                    } else if (panel.getAlpha() < 0.95f) {
+                        panel.animate().alpha(1.0f).setDuration(180).start();
+                    }
+                } else if (!autoHide && panel != null && panel.getAlpha() < 0.95f) {
+                    panel.setAlpha(1.0f);
+                }
             }
         });
     }
 
     private void updateStatus() {
         if (statusText == null) return;
-        if (collapsed) {
+        if (bubbleMode) {
             statusText.setText(aimValue ? "aim " + aimScoreValue + "%" : "--");
             return;
         }

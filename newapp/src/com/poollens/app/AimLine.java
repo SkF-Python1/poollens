@@ -148,6 +148,8 @@ final class AimLine {
             }
             s.x1 = x;
             s.y1 = y;
+            s.x2 = hx;
+            s.y2 = hy;
             s.x2 = inPocket ? potX : hx;
             s.y2 = inPocket ? potY : hy;
             s.bounce = bounces;

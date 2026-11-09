@@ -6,7 +6,10 @@ import android.graphics.Canvas;
 import android.graphics.Color;
 import android.graphics.Paint;
 import android.graphics.PorterDuff;
+import android.os.Handler;
+import android.os.Looper;
 import android.util.Log;
+import android.view.Choreographer;
 import android.view.MotionEvent;
 import android.view.View;
 import android.view.WindowManager;
@@ -241,6 +244,37 @@ class GuideOverlay {
     void setBankCount(int n) { bankCount = Math.max(0, Math.min(6, n)); invalidate(); }
     int  bankCount()         { return bankCount; }
 
+    private final Handler mainHandler = new Handler(Looper.getMainLooper());
+    private volatile boolean vsyncRunning = false;
+
+    private final Choreographer.FrameCallback vsyncCallback = new Choreographer.FrameCallback() {
+        @Override
+        public void doFrame(long frameTimeNanos) {
+            if (!shown || view == null) {
+                vsyncRunning = false;
+                return;
+            }
+            boolean more = view.onVsync(frameTimeNanos);
+            if (more && enabled && !calibrating) {
+                Choreographer.getInstance().postFrameCallback(this);
+            } else {
+                vsyncRunning = false;
+            }
+        }
+    };
+
+    private void scheduleVsync() {
+        if (!vsyncRunning) {
+            vsyncRunning = true;
+            mainHandler.post(new Runnable() {
+                @Override
+                public void run() {
+                    Choreographer.getInstance().postFrameCallback(vsyncCallback);
+                }
+            });
+        }
+    }
+
     private void invalidate() {
         CanvasView v = view;
         if (v != null) v.postInvalidate();
@@ -278,6 +312,7 @@ class GuideOverlay {
     }
 
     void hide() {
+        vsyncRunning = false;
         if (view != null && shown) {
             try { wm.removeView(view); } catch (Exception ignored) {}
         }
@@ -285,11 +320,17 @@ class GuideOverlay {
         shown = false;
     }
 
-    /** Called from the capture thread; drawing happens on the UI thread. */
+    /** Called from the capture thread; drawing happens on the UI thread at up to 120Hz via VSYNC interpolation. */
     void render(Detector.Result result) {
         last = result;
         CanvasView v = view;
-        if (v != null) v.postInvalidate();
+        if (v != null) {
+            if (result != null && result.aimFound && enabled && !calibrating) {
+                scheduleVsync();
+            } else {
+                v.postInvalidate();
+            }
+        }
     }
 
     // ---------------------------------------------------------------- canvas view
@@ -323,13 +364,20 @@ class GuideOverlay {
         private int dragMode = DRAG_NONE;
         private float lastTouchX, lastTouchY;
 
-        /** Smooth-hold for the aim and target angles. */
-        private float smoothAimAngle = Float.NaN;
-        private float smoothTargetAngle = Float.NaN;
-        private float lastStubTipX = Float.NaN;
-        private float lastStubTipY = Float.NaN;
+        // Display refresh interpolation state (60-120 Hz motion smoothing)
+        private long lastVsyncNanos = 0;
+        private float renderAimAngle = Float.NaN;
+        private float renderObjAngle = Float.NaN;
+        private float renderCueX = Float.NaN;
+        private float renderCueY = Float.NaN;
+        private float renderCueR = Float.NaN;
+        private float renderGhostX = Float.NaN;
+        private float renderGhostY = Float.NaN;
+        private float renderStubTipX = Float.NaN;
+        private float renderStubTipY = Float.NaN;
+
         private Detector.Ball lastTarget = null;
-        private static final int AIM_HOLD = 6;
+        private static final int AIM_HOLD = 8;
         private int holdCounter;
         private Detector.Result heldResult;
 
@@ -451,87 +499,129 @@ class GuideOverlay {
             return super.onTouchEvent(e);
         }
 
+        /**
+         * Runs on VSYNC (up to 120 Hz) to smoothly interpolate cue drag rotations
+         * between the 35 Hz capture samples.
+         */
+        boolean onVsync(long frameTimeNanos) {
+            float dt = lastVsyncNanos > 0 ? (frameTimeNanos - lastVsyncNanos) * 1e-9f : 0.016f;
+            lastVsyncNanos = frameTimeNanos;
+            dt = Math.max(0.001f, Math.min(0.040f, dt));
+
+            Detector.Result raw = last;
+            if (raw == null || !raw.aimFound || raw.cue == null || Float.isNaN(raw.aimAngle)) {
+                if (holdCounter > 0) {
+                    holdCounter--;
+                    invalidate();
+                    return true;
+                }
+                renderAimAngle = Float.NaN;
+                renderObjAngle = Float.NaN;
+                renderCueX = Float.NaN;
+                renderCueY = Float.NaN;
+                renderGhostX = Float.NaN;
+                renderGhostY = Float.NaN;
+                renderStubTipX = Float.NaN;
+                renderStubTipY = Float.NaN;
+                heldResult = null;
+                invalidate();
+                return false;
+            }
+
+            holdCounter = AIM_HOLD;
+            heldResult = raw;
+
+            // Target coordinates from latest detection
+            float tCueX = vx(raw.cue.x);
+            float tCueY = vy(raw.cue.y);
+            float tCueR = Math.max(10f, vLen(raw.cue.radius));
+
+            final float aimDx = (float) Math.cos(raw.aimAngle);
+            final float aimDy = (float) Math.sin(raw.aimAngle);
+            final boolean hasGhost = !Float.isNaN(raw.ghostX) && !Float.isNaN(raw.ghostY);
+            float tGhostX = hasGhost ? vx(raw.ghostX) : tCueX + aimDx * 300f;
+            float tGhostY = hasGhost ? vy(raw.ghostY) : tCueY + aimDy * 300f;
+
+            // Exponential interpolation factor matching VSYNC dt (60-120 Hz)
+            float factor = 1.0f - (float) Math.exp(-dt * 45.0f);
+
+            // Interpolate Aim Angle
+            if (Float.isNaN(renderAimAngle)) {
+                renderAimAngle = raw.aimAngle;
+            } else {
+                float dAim = angleDelta(raw.aimAngle, renderAimAngle);
+                if (Math.abs(dAim) < 0.0004f) {
+                    renderAimAngle = raw.aimAngle;
+                } else {
+                    renderAimAngle += dAim * factor;
+                }
+            }
+
+            // Interpolate Object Target Angle
+            if (raw.aimTarget != null && !Float.isNaN(raw.targetAngle)) {
+                if (Float.isNaN(renderObjAngle) || lastTarget == null
+                        || Math.hypot(raw.aimTarget.x - lastTarget.x, raw.aimTarget.y - lastTarget.y) > 25) {
+                    renderObjAngle = raw.targetAngle;
+                    lastTarget = raw.aimTarget;
+                } else {
+                    float dObj = angleDelta(raw.targetAngle, renderObjAngle);
+                    if (Math.abs(dObj) < 0.0004f) {
+                        renderObjAngle = raw.targetAngle;
+                    } else {
+                        renderObjAngle += dObj * factor;
+                    }
+                }
+            } else {
+                renderObjAngle = Float.NaN;
+                lastTarget = null;
+            }
+
+            // Interpolate Positions
+            if (Float.isNaN(renderCueX)) {
+                renderCueX = tCueX;
+                renderCueY = tCueY;
+                renderCueR = tCueR;
+                renderGhostX = tGhostX;
+                renderGhostY = tGhostY;
+            } else {
+                renderCueX += (tCueX - renderCueX) * factor;
+                renderCueY += (tCueY - renderCueY) * factor;
+                renderCueR = tCueR;
+                renderGhostX += (tGhostX - renderGhostX) * factor;
+                renderGhostY += (tGhostY - renderGhostY) * factor;
+            }
+
+            if (!Float.isNaN(raw.stubTipX) && !Float.isNaN(raw.stubTipY)) {
+                float sX = vx(raw.stubTipX);
+                float sY = vy(raw.stubTipY);
+                if (Float.isNaN(renderStubTipX)) {
+                    renderStubTipX = sX;
+                    renderStubTipY = sY;
+                } else {
+                    renderStubTipX += (sX - renderStubTipX) * factor;
+                    renderStubTipY += (sY - renderStubTipY) * factor;
+                }
+            } else {
+                renderStubTipX = Float.NaN;
+                renderStubTipY = Float.NaN;
+            }
+
+            invalidate();
+            return true;
+        }
+
         @Override
         protected void onDraw(Canvas c) {
             super.onDraw(c);
             c.drawColor(Color.TRANSPARENT, PorterDuff.Mode.CLEAR);
 
             if (!enabled) {
-                heldResult  = null;
+                heldResult = null;
                 holdCounter = 0;
-                smoothAimAngle = Float.NaN;
-                smoothTargetAngle = Float.NaN;
-                lastTarget = null;
                 return;
             }
 
-            Detector.Result r = null;
-            Detector.Result raw = last;
-
-            // --- Aim smoothing + hold ---
-            if (raw != null && raw.tableFound) {
-                if (raw.aimFound && raw.cue != null && !Float.isNaN(raw.aimAngle)) {
-                    if (!Float.isNaN(smoothAimAngle)) {
-                        float delta = angleDelta(raw.aimAngle, smoothAimAngle);
-                        // Micro deadband (< 0.17 deg) prevents line jitter when cue is stationary
-                        if (Math.abs(delta) < 0.003f) {
-                            // perfectly static
-                        } else if (Math.abs(delta) < 0.12f) {
-                            smoothAimAngle += delta * 0.35f;
-                        } else {
-                            smoothAimAngle = raw.aimAngle;
-                        }
-                    } else {
-                        smoothAimAngle = raw.aimAngle;
-                    }
-                    Detector.Result copy = raw.copy();
-                    copy.aimAngle = smoothAimAngle;
-
-                    // Target angle: switch targets immediately, gentle deadband for micro-jitter
-                    if (copy.aimTarget != null && !Float.isNaN(copy.targetAngle)) {
-                        if (!Float.isNaN(smoothTargetAngle) && lastTarget != null
-                                && Math.hypot(copy.aimTarget.x - lastTarget.x, copy.aimTarget.y - lastTarget.y) < 20) {
-                            float dTarget = angleDelta(copy.targetAngle, smoothTargetAngle);
-                            if (Math.abs(dTarget) < 0.003f) {
-                                copy.targetAngle = smoothTargetAngle;
-                            } else {
-                                smoothTargetAngle += dTarget * 0.45f;
-                                copy.targetAngle = smoothTargetAngle;
-                            }
-                        } else {
-                            smoothTargetAngle = copy.targetAngle;
-                            lastTarget = copy.aimTarget;
-                        }
-                        lastStubTipX = copy.stubTipX;
-                        lastStubTipY = copy.stubTipY;
-                    } else {
-                        smoothTargetAngle = Float.NaN;
-                        lastTarget = null;
-                        lastStubTipX = Float.NaN;
-                        lastStubTipY = Float.NaN;
-                    }
-
-                    heldResult  = copy;
-                    holdCounter = AIM_HOLD;
-                    r = heldResult;
-                } else if (holdCounter > 0) {
-                    holdCounter--;
-                    r = heldResult;
-                } else {
-                    smoothAimAngle = Float.NaN;
-                    smoothTargetAngle = Float.NaN;
-                    lastTarget = null;
-                    heldResult  = null;
-                }
-            } else if (holdCounter > 0) {
-                holdCounter--;
-                r = heldResult;
-            } else {
-                smoothAimAngle = Float.NaN;
-                smoothTargetAngle = Float.NaN;
-                lastTarget = null;
-                heldResult = null;
-            }
+            Detector.Result r = heldResult != null ? heldResult : last;
 
             // Determine table bounds (custom calibrated or auto-detected)
             float tL, tT, tR, tB;
@@ -546,11 +636,11 @@ class GuideOverlay {
                 tB = vy(r.tableBottom);
                 hasTable = (tR > tL + 20f && tB > tT + 20f);
                 mL = tL; mT = tT; mR = tR; mB = tB;
-            } else if (raw != null && raw.tableFound) {
-                tL = vx(raw.tableLeft);
-                tT = vy(raw.tableTop);
-                tR = vx(raw.tableRight);
-                tB = vy(raw.tableBottom);
+            } else if (last != null && last.tableFound) {
+                tL = vx(last.tableLeft);
+                tT = vy(last.tableTop);
+                tR = vx(last.tableRight);
+                tB = vy(last.tableBottom);
                 hasTable = (tR > tL + 20f && tB > tT + 20f);
                 mL = tL; mT = tT; mR = tR; mB = tB;
             } else if (mL > 0 && mR > mL + 20f) {
@@ -565,10 +655,76 @@ class GuideOverlay {
                 drawCustomBorder(c, tL, tT, tR, tB, calibrating);
             }
 
-            if (r == null || !r.aimFound || !hasTable) return;
+            if (calibrating || r == null || !r.aimFound || !hasTable) return;
+
+            // Smooth 60-120Hz interpolated angle & coordinates
+            float aimAngle = !Float.isNaN(renderAimAngle) ? renderAimAngle : r.aimAngle;
+            if (Float.isNaN(aimAngle)) return;
+
+            float cueX = !Float.isNaN(renderCueX) ? renderCueX : vx(r.cue.x);
+            float cueY = !Float.isNaN(renderCueY) ? renderCueY : vy(r.cue.y);
+            float cueR = !Float.isNaN(renderCueR) ? renderCueR : Math.max(10f, vLen(r.cue.radius));
+
+            float aimDx = (float) Math.cos(aimAngle);
+            float aimDy = (float) Math.sin(aimAngle);
+
+            boolean hasGhost = !Float.isNaN(r.ghostX) && !Float.isNaN(r.ghostY);
+            boolean hasTarget = r.aimTarget != null && hasGhost;
+
+            float ghostX = !Float.isNaN(renderGhostX) ? renderGhostX : (hasGhost ? vx(r.ghostX) : cueX + aimDx * 300f);
+            float ghostY = !Float.isNaN(renderGhostY) ? renderGhostY : (hasGhost ? vy(r.ghostY) : cueY + aimDy * 300f);
+
+            float stubX = renderStubTipX;
+            float stubY = renderStubTipY;
+            float objAngle = renderObjAngle;
 
             InkMask.begin();
-            if (showAim) drawAimLines(c, r, tL, tT, tR, tB);
+            if (showAim) {
+                // WHITE line
+                if (showWhite) {
+                    drawWhiteLine(c, cueX, cueY, cueR, ghostX, ghostY, r, tL, tT, tR, tB);
+                }
+
+                // Ghost ring (only if WHITE guideline is toggled ON)
+                if (showWhite && hasTarget) {
+                    linePaint.setColor(0xB0FFFFFF);
+                    linePaint.setStrokeWidth(thickAim ? 5f : 3f);
+                    drawAndMaskCircle(c, linePaint, ghostX, ghostY, cueR * 0.8f);
+                }
+
+                // YELLOW - primary aim line with 60-120Hz VSYNC interpolation
+                if (showYellow) {
+                    drawYellowLine(c, r, cueX, cueY, ghostX, ghostY, cueR,
+                            aimDx, aimDy, aimAngle, hasTarget,
+                            stubX, stubY, objAngle,
+                            tL, tT, tR, tB);
+                }
+
+                // CYAN after-contact
+                if (showCyan && hasTarget) {
+                    drawCyanLine(c, r, ghostX, ghostY, cueR, aimDx, aimDy, tL, tT, tR, tB);
+                }
+
+                // CYAN kick (no target)
+                if (showCyan && !hasTarget && bankCount > 0) {
+                    runAndPaint(c, linePaint, segs, cueX, cueY, aimAngle, 0f,
+                            tL, tT, tR, tB, 0xEE7FD4FF, thickAim ? BANK_W_THICK : BANK_W, bankCount);
+                }
+
+                // Debug
+                if (DEBUG_VIS) {
+                    dbgPaint.setColor(0xFFFF0000);
+                    drawAndMaskCircle(c, dbgPaint, cueX, cueY, cueR + 4f);
+                    if (hasGhost) {
+                        dbgPaint.setColor(0xFF00FF00);
+                        drawAndMaskCircle(c, dbgPaint, ghostX, ghostY, cueR + 4f);
+                    }
+                    if (hasTarget) {
+                        dbgPaint.setColor(0xFFFF8800);
+                        drawAndMaskCircle(c, dbgPaint, vx(r.aimTarget.x), vy(r.aimTarget.y), cueR + 4f);
+                    }
+                }
+            }
             InkMask.commit();
         }
 
@@ -579,72 +735,7 @@ class GuideOverlay {
             return d;
         }
 
-        // ---------------------------------------------------------------- main draw
 
-        private void drawAimLines(Canvas c, Detector.Result r,
-                                  float tL, float tT, float tR, float tB) {
-            if (r.cue == null || Float.isNaN(r.aimAngle)) return;
-            if (tR - tL < 4f || tB - tT < 4f) return;
-
-            // Cue ball
-            final float cueX = vx(r.cue.x);
-            final float cueY = vy(r.cue.y);
-            final float cueR = Math.max(10f, vLen(r.cue.radius));
-
-            // Aim direction
-            final float aimDx = (float) Math.cos(r.aimAngle);
-            final float aimDy = (float) Math.sin(r.aimAngle);
-
-            // Ghost / target
-            final boolean hasGhost  = !Float.isNaN(r.ghostX) && !Float.isNaN(r.ghostY);
-            final boolean hasTarget = r.aimTarget != null && hasGhost;
-
-            final float ghostX = hasGhost ? vx(r.ghostX) : cueX + aimDx * 300f;
-            final float ghostY = hasGhost ? vy(r.ghostY) : cueY + aimDy * 300f;
-
-            // WHITE line
-            if (showWhite) {
-                drawWhiteLine(c, cueX, cueY, cueR, ghostX, ghostY, r, tL, tT, tR, tB);
-            }
-
-            // Ghost ring (only if WHITE guideline is toggled ON)
-            if (showWhite && hasTarget) {
-                linePaint.setColor(0xB0FFFFFF);
-                linePaint.setStrokeWidth(thickAim ? 5f : 3f);
-                drawAndMaskCircle(c, linePaint, ghostX, ghostY, cueR * 0.8f);
-            }
-
-            // YELLOW - primary aim line, always present across all parts of table
-            if (showYellow) {
-                drawYellowLine(c, r, cueX, cueY, ghostX, ghostY, cueR, aimDx, aimDy,
-                        hasTarget, tL, tT, tR, tB);
-            }
-
-            // CYAN after-contact
-            if (showCyan && hasTarget) {
-                drawCyanLine(c, r, ghostX, ghostY, cueR, aimDx, aimDy, tL, tT, tR, tB);
-            }
-
-            // CYAN kick (no target)
-            if (showCyan && !hasTarget && bankCount > 0) {
-                runAndPaint(c, linePaint, segs, cueX, cueY, r.aimAngle, 0f,
-                        tL, tT, tR, tB, 0xEE7FD4FF, thickAim ? BANK_W_THICK : BANK_W, bankCount);
-            }
-
-            // Debug
-            if (DEBUG_VIS) {
-                dbgPaint.setColor(0xFFFF0000);
-                drawAndMaskCircle(c, dbgPaint, cueX, cueY, cueR + 4f);
-                if (hasGhost) {
-                    dbgPaint.setColor(0xFF00FF00);
-                    drawAndMaskCircle(c, dbgPaint, ghostX, ghostY, cueR + 4f);
-                }
-                if (hasTarget) {
-                    dbgPaint.setColor(0xFFFF8800);
-                    drawAndMaskCircle(c, dbgPaint, vx(r.aimTarget.x), vy(r.aimTarget.y), cueR + 4f);
-                }
-            }
-        }
 
         // ---------------------------------------------------------------- WHITE
 
@@ -682,7 +773,7 @@ class GuideOverlay {
         // ---------------------------------------------------------------- YELLOW
 
         /**
-         * YELLOW = primary aim & trajectory line.
+         * YELLOW = primary aim & trajectory line with 60-120Hz VSYNC interpolation.
          *
          * Consistently displays across all parts of the table:
          * 1) Target ball hit: extends the target ball trajectory from the game stub tip
@@ -693,8 +784,9 @@ class GuideOverlay {
         private void drawYellowLine(Canvas c, Detector.Result r,
                                     float cueX, float cueY,
                                     float ghostX, float ghostY, float cueR,
-                                    float aimDx, float aimDy,
+                                    float aimDx, float aimDy, float aimAngle,
                                     boolean hasTarget,
+                                    float stubX, float stubY, float objAngle,
                                     float tL, float tT, float tR, float tB) {
             final float startX;
             final float startY;
@@ -705,11 +797,11 @@ class GuideOverlay {
                 final float ty   = vy(r.aimTarget.y);
                 final float tRad = Math.max(cueR * 0.8f, vLen(r.aimTarget.radius));
 
-                if (!Float.isNaN(r.stubTipX) && !Float.isNaN(r.stubTipY) && !Float.isNaN(r.targetAngle)) {
+                if (!Float.isNaN(stubX) && !Float.isNaN(stubY) && !Float.isNaN(objAngle)) {
                     // Seamless extension: start directly at the tip of the game's own white stub!
-                    startX = vx(r.stubTipX);
-                    startY = vy(r.stubTipY);
-                    ang = r.targetAngle;
+                    startX = stubX;
+                    startY = stubY;
+                    ang = objAngle;
                 } else {
                     float dx = tx - ghostX;
                     float dy = ty - ghostY;
@@ -721,7 +813,7 @@ class GuideOverlay {
                         dx /= d;
                         dy /= d;
                     }
-                    ang = !Float.isNaN(r.targetAngle) ? r.targetAngle : (float) Math.atan2(dy, dx);
+                    ang = !Float.isNaN(objAngle) ? objAngle : (!Float.isNaN(r.targetAngle) ? r.targetAngle : (float) Math.atan2(dy, dx));
                     startX = tx + dx * tRad;
                     startY = ty + dy * tRad;
                 }
@@ -729,7 +821,7 @@ class GuideOverlay {
                 // Kick / cushion shot: start at cue ball and fold off cushions!
                 startX = cueX;
                 startY = cueY;
-                ang = r.aimAngle;
+                ang = aimAngle;
             }
 
             int n = runAndPaint(c, linePaint, objSegs, startX, startY, ang, 0f,
