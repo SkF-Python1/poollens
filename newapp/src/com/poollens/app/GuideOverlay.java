@@ -371,12 +371,16 @@ class GuideOverlay {
                         displayed.ghostX = r.ghostX;
                         displayed.ghostY = r.ghostY;
                         displayed.targetAngle = r.targetAngle;
+                        displayed.stubTipX = r.stubTipX;
+                        displayed.stubTipY = r.stubTipY;
                         displayed.cueReboundAngle = r.cueReboundAngle;
                     } else {
                         displayed.aimTarget = null;
                         displayed.ghostX = Float.NaN;
                         displayed.ghostY = Float.NaN;
                         displayed.targetAngle = Float.NaN;
+                        displayed.stubTipX = Float.NaN;
+                        displayed.stubTipY = Float.NaN;
                         displayed.cueReboundAngle = Float.NaN;
                     }
                 }
@@ -597,7 +601,20 @@ class GuideOverlay {
                 ang = (float) Math.atan2(oy, ox);
             }
 
-            final int n = runShot(c, aim, objSegs, tx, ty, ang, tR,
+            final float startX;
+            final float startY;
+            final float inset;
+            if (!Float.isNaN(r.stubTipX) && !Float.isNaN(r.stubTipY)) {
+                startX = viewX(r.stubTipX);
+                startY = viewY(r.stubTipY);
+                inset = 0f;
+            } else {
+                startX = tx;
+                startY = ty;
+                inset = tR;
+            }
+
+            final int n = runShot(c, aim, objSegs, startX, startY, ang, inset,
                     L, TP, R, B, 0xFFFFC020,
                     thickAim ? OBJ_W_THICK : OBJ_W, bankCount);
             if (n <= 0 || objSegs[0] == null) return;

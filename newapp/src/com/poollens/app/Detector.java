@@ -50,6 +50,8 @@ final class Detector {
     private static int[] coreCovBuf = new int[0];
     private static boolean[] tmpBuf = new boolean[0];
     private static int[] thinBuf = new int[360];
+    private static float[] stubPtsX = new float[512];
+    private static float[] stubPtsY = new float[512];
 
     /** Returns {@code buf} when it is big enough, else a new one of that size. */
     private static int[] ensure(int[] buf, int n) {
@@ -103,6 +105,8 @@ final class Detector {
         float stickAngle = Float.NaN;
         /** Target ball outgoing aim trajectory angle, radians. */
         float targetAngle = Float.NaN;
+        /** Outermost tip of the game's white aim stub, if detected. */
+        float stubTipX = Float.NaN, stubTipY = Float.NaN;
         /** Cue ball rebound deflection trajectory angle, radians. */
         float cueReboundAngle = Float.NaN;
 
@@ -123,6 +127,8 @@ final class Detector {
             o.ghostY = ghostY;
             o.stickAngle = stickAngle;
             o.targetAngle = targetAngle;
+            o.stubTipX = stubTipX;
+            o.stubTipY = stubTipY;
             o.cueReboundAngle = cueReboundAngle;
             return o;
         }
@@ -421,51 +427,56 @@ final class Detector {
             }
         }
 
-        // Fallback: if no cue stick is visible (or guideline was not found around stick),
-        // perform full 360-degree coarse scan.
+        // Fallback: if cue stick is visible, stick reliably anchors aim direction.
+        // If no stick visible, perform full 360-degree coarse scan.
         if (bestHits < 5) {
-            int coarseHits = 0;
-            float coarseBest = Float.NaN;
-            for (int a = 0; a < 360; a += 2) {
-                double th = Math.toRadians(a);
-                float dx = (float) Math.cos(th);
-                float dy = (float) Math.sin(th);
-                float pxv = -dy;
-                float pyv = dx;
+            if (hasStick) {
+                bestAngle = stickAngle;
+                bestHits = 5;
+            } else {
+                int coarseHits = 0;
+                float coarseBest = Float.NaN;
+                for (int a = 0; a < 360; a += 2) {
+                    double th = Math.toRadians(a);
+                    float dx = (float) Math.cos(th);
+                    float dy = (float) Math.sin(th);
+                    float pxv = -dy;
+                    float pyv = dx;
 
-                int hits = 0;
-                int misses = 0;
-                for (int i = 1; i <= rings; i++) {
-                    float dist = r0 + i * ringStep;
-                    int rx = (int) (cx + dx * dist);
-                    int ry = (int) (cy + dy * dist);
-                    if (rx < 1 || ry < 1 || rx >= w - 1 || ry >= h - 1) break;
+                    int hits = 0;
+                    int misses = 0;
+                    for (int i = 1; i <= rings; i++) {
+                        float dist = r0 + i * ringStep;
+                        int rx = (int) (cx + dx * dist);
+                        int ry = (int) (cy + dy * dist);
+                        if (rx < 1 || ry < 1 || rx >= w - 1 || ry >= h - 1) break;
 
-                    boolean hit = false;
-                    for (int k = -tang; k <= tang; k++) {
-                        float off = k * tangStep;
-                        int x = (int) (cx + dx * dist + pxv * off);
-                        int y = (int) (cy + dy * dist + pyv * off);
-                        if (x < 1 || y < 1 || x >= w - 1 || y >= h - 1) continue;
-                        if (InkMask.isInk(x, y)) continue;
-                        if (isGuidePixel(rgba[y * w + x])) { hit = true; break; }
+                        boolean hit = false;
+                        for (int k = -tang; k <= tang; k++) {
+                            float off = k * tangStep;
+                            int x = (int) (cx + dx * dist + pxv * off);
+                            int y = (int) (cy + dy * dist + pyv * off);
+                            if (x < 1 || y < 1 || x >= w - 1 || y >= h - 1) continue;
+                            if (InkMask.isInk(x, y)) continue;
+                            if (isGuidePixel(rgba[y * w + x])) { hit = true; break; }
+                        }
+                        if (hit) {
+                            hits++;
+                            misses = 0;
+                        } else {
+                            misses++;
+                            if (misses > 10 && i > 12) break;
+                        }
                     }
-                    if (hit) {
-                        hits++;
-                        misses = 0;
-                    } else {
-                        misses++;
-                        if (misses > 10 && i > 12) break;
+                    if (hits > coarseHits) {
+                        coarseHits = hits;
+                        coarseBest = (float) th;
                     }
                 }
-                if (hits > coarseHits) {
-                    coarseHits = hits;
-                    coarseBest = (float) th;
+                if (coarseHits >= 10) {
+                    bestHits = coarseHits;
+                    bestAngle = coarseBest;
                 }
-            }
-            if (coarseHits >= 10) {
-                bestHits = coarseHits;
-                bestAngle = coarseBest;
             }
         }
 
@@ -787,33 +798,99 @@ final class Detector {
         if (bestBallRatio >= 0.40f) {
             out.aimTarget = new Ball(Math.round(bestTx), Math.round(bestTy), Math.round(r));
 
-            // Step 4: Refine target angle using the game's white aim stub AM leaving (bestTx, bestTy)
-            float sumStubA = 0f;
-            int countStubA = 0;
-            float baseDeg = (float) Math.toDegrees(bestTargetAng);
-            for (float delta = -15f; delta <= 15f; delta += 1.0f) {
-                float testDeg = baseDeg + delta;
-                double th = Math.toRadians(testDeg);
-                float dxS = (float) Math.cos(th);
-                float dyS = (float) Math.sin(th);
-                int stubPts = 0;
-                for (float d = r * 0.8f; d <= r * 2.5f; d += 2f) {
-                    int px = (int) (bestTx + dxS * d);
-                    int py = (int) (bestTy + dyS * d);
+            // Approximate line of centers vector from ghost to target:
+            float vgtX = bestTx - gx;
+            float vgtY = bestTy - gy;
+            float vgtLen = (float) Math.hypot(vgtX, vgtY);
+            if (vgtLen > 0.01f) {
+                vgtX /= vgtLen;
+                vgtY /= vgtLen;
+            } else {
+                vgtX = (float) Math.cos(bestTargetAng);
+                vgtY = (float) Math.sin(bestTargetAng);
+            }
+
+            // Step 4: Direct Stub Line Fitting (fit straight line through the game's actual AM stub)
+            // Collect all guide pixels in the outer annulus around the target ball
+            int box = Math.round(r * 2.8f) + 1;
+            float rMin2 = (r * 0.75f) * (r * 0.75f);
+            float rMax2 = (r * 2.8f) * (r * 2.8f);
+
+            int stubN = 0;
+            float sumX = 0f, sumY = 0f;
+            if (stubPtsX.length < 512) {
+                stubPtsX = new float[512];
+                stubPtsY = new float[512];
+            }
+
+            for (int dyB = -box; dyB <= box; dyB++) {
+                for (int dxB = -box; dxB <= box; dxB++) {
+                    float d2 = dxB * dxB + dyB * dyB;
+                    if (d2 < rMin2 || d2 > rMax2) continue;
+                    // Forward direction: must point away from contact / ghost ball
+                    float dotFwd = dxB * vgtX + dyB * vgtY;
+                    if (dotFwd <= 0f) continue;
+
+                    int px = (int) (bestTx + dxB);
+                    int py = (int) (bestTy + dyB);
                     if (px < 1 || py < 1 || px >= w - 1 || py >= h - 1) continue;
                     if (InkMask.isInk(px, py)) continue;
-                    if (isGuidePixel(rgba[py * w + px])) stubPts++;
-                }
-                if (stubPts >= 2) {
-                    sumStubA += testDeg;
-                    countStubA++;
+                    if (isGuidePixel(rgba[py * w + px])) {
+                        if (stubN < stubPtsX.length) {
+                            stubPtsX[stubN] = px;
+                            stubPtsY[stubN] = py;
+                            sumX += px;
+                            sumY += py;
+                            stubN++;
+                        }
+                    }
                 }
             }
 
-            if (countStubA > 0) {
-                out.targetAngle = (float) Math.toRadians(sumStubA / countStubA);
+            if (stubN >= 8) {
+                // Analytical Principal Component / Covariance Line Fitting
+                float meanX = sumX / stubN;
+                float meanY = sumY / stubN;
+                float sxx = 0f, syy = 0f, sxy = 0f;
+                for (int i = 0; i < stubN; i++) {
+                    float ox = stubPtsX[i] - meanX;
+                    float oy = stubPtsY[i] - meanY;
+                    sxx += ox * ox;
+                    syy += oy * oy;
+                    sxy += ox * oy;
+                }
+
+                float stubTheta = 0.5f * (float) Math.atan2(2f * sxy, sxx - syy);
+                float dirStubX = (float) Math.cos(stubTheta);
+                float dirStubY = (float) Math.sin(stubTheta);
+                // Ensure stubTheta points away from target ball center
+                if (dirStubX * vgtX + dirStubY * vgtY < 0f) {
+                    dirStubX = -dirStubX;
+                    dirStubY = -dirStubY;
+                    stubTheta = (float) Math.atan2(dirStubY, dirStubX);
+                }
+
+                out.targetAngle = stubTheta;
+
+                // Find outermost tip along this direction:
+                float maxProj = -Float.MAX_VALUE;
+                float tipX = bestTx;
+                float tipY = bestTy;
+                for (int i = 0; i < stubN; i++) {
+                    float proj = (stubPtsX[i] - bestTx) * dirStubX + (stubPtsY[i] - bestTy) * dirStubY;
+                    if (proj > maxProj) {
+                        maxProj = proj;
+                        tipX = stubPtsX[i];
+                        tipY = stubPtsY[i];
+                    }
+                }
+                out.stubTipX = tipX;
+                out.stubTipY = tipY;
             } else {
+                // Fallback to geometric line of centers if stub is obscured
                 out.targetAngle = bestTargetAng;
+                out.stubTipX = Float.NaN;
+                out.stubTipY = Float.NaN;
             }
 
             // Step 5: Cue Rebound angle (perpendicular impulse)
