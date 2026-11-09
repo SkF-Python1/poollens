@@ -13,6 +13,8 @@ final class AimLine {
         float x1, y1, x2, y2;
         /** 0 = first flight, 1 = after one cushion, ... */
         int bounce;
+        /** True if the segment terminates inside a pocket (no rebound). */
+        boolean potted;
     }
 
     private AimLine() {
@@ -91,6 +93,54 @@ final class AimLine {
             hx = clamp(hx, l, r);
             hy = clamp(hy, t, b);
 
+            // 6-Pocket Detection:
+            // Check if (hx, hy) lands within any of the 6 pocket mouths.
+            // When a ball enters a pocket, it sinks into the pocket hole outside the cushion box and does NOT rebound!
+            final float ballR = ballRadius > 0.1f ? ballRadius : Math.max(12f, (right - left) / 60f);
+            final float cornerMouth = 1.9f * ballR;
+            final float sideMouth = 1.4f * ballR;
+            final float xMid = (left + right) * 0.5f;
+
+            boolean inPocket = false;
+            float potX = hx, potY = hy;
+
+            // 1) Top-Left Corner
+            if ((wall == 4 && hx <= left + cornerMouth) || (wall == 2 && hy <= top + cornerMouth)) {
+                inPocket = true;
+                potX = left - 0.6f * ballR;
+                potY = top - 0.6f * ballR;
+            }
+            // 2) Top-Right Corner
+            else if ((wall == 4 && hx >= right - cornerMouth) || (wall == 1 && hy <= top + cornerMouth)) {
+                inPocket = true;
+                potX = right + 0.6f * ballR;
+                potY = top - 0.6f * ballR;
+            }
+            // 3) Bottom-Left Corner
+            else if ((wall == 3 && hx <= left + cornerMouth) || (wall == 2 && hy >= bottom - cornerMouth)) {
+                inPocket = true;
+                potX = left - 0.6f * ballR;
+                potY = bottom + 0.6f * ballR;
+            }
+            // 4) Bottom-Right Corner
+            else if ((wall == 3 && hx >= right - cornerMouth) || (wall == 1 && hy >= bottom - cornerMouth)) {
+                inPocket = true;
+                potX = right + 0.6f * ballR;
+                potY = bottom + 0.6f * ballR;
+            }
+            // 5) Top-Middle Side Pocket
+            else if (wall == 4 && Math.abs(hx - xMid) <= sideMouth) {
+                inPocket = true;
+                potX = xMid;
+                potY = top - 0.5f * ballR;
+            }
+            // 6) Bottom-Middle Side Pocket
+            else if (wall == 3 && Math.abs(hx - xMid) <= sideMouth) {
+                inPocket = true;
+                potX = xMid;
+                potY = bottom + 0.5f * ballR;
+            }
+
             Segment s = out[count];
             if (s == null) {
                 s = new Segment();
@@ -98,10 +148,14 @@ final class AimLine {
             }
             s.x1 = x;
             s.y1 = y;
-            s.x2 = hx;
-            s.y2 = hy;
+            s.x2 = inPocket ? potX : hx;
+            s.y2 = inPocket ? potY : hy;
             s.bounce = bounces;
+            s.potted = inPocket;
             count++;
+
+            // If the shot entered a pocket, it is potted: NO REBOUND!
+            if (inPocket) break;
 
             if (bounces >= maxBounces) break;
 

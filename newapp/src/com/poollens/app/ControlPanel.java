@@ -39,11 +39,14 @@ class ControlPanel {
     private WindowManager.LayoutParams lp;
 
     private TextView guideButton;
+    private TextView borderButton;
     private TextView yellowButton;
     private TextView cyanButton;
     private TextView whiteButton;
     private TextView bankButton;
     private TextView widthButton;
+    private TextView editButton;
+    private TextView resetButton;
     private TextView statusText;
     private TextView title;
     private TextView minButton;
@@ -241,10 +244,18 @@ class ControlPanel {
             }
         });
 
-        whiteButton = addButton(rowB, new Runnable() {
+        whiteButton = addButton(rowA, new Runnable() {
             @Override
             public void run() {
                 if (guide != null) guide.toggleWhite();
+                refreshLabels();
+            }
+        });
+
+        borderButton = addButton(rowA, new Runnable() {
+            @Override
+            public void run() {
+                if (guide != null) guide.toggleBorder();
                 refreshLabels();
             }
         });
@@ -262,6 +273,28 @@ class ControlPanel {
             @Override
             public void run() {
                 if (guide != null) guide.toggleThickAim();
+                refreshLabels();
+            }
+        });
+
+        editButton = addButton(rowB, new Runnable() {
+            @Override
+            public void run() {
+                if (guide == null) return;
+                if (guide.isCalibrating()) {
+                    guide.saveRect();
+                } else {
+                    guide.setCalibrating(true);
+                    raise();
+                }
+                refreshLabels();
+            }
+        });
+
+        resetButton = addButton(rowB, new Runnable() {
+            @Override
+            public void run() {
+                if (guide != null) guide.resetRect();
                 refreshLabels();
             }
         });
@@ -331,6 +364,8 @@ class ControlPanel {
                 }
                 set(guideButton, "GUIDE", g.isEnabled() ? "ON" : "OFF",
                         g.isEnabled() ? 0xFF3DDC97 : 0xFF7C8B99);
+                set(borderButton, "BORDER", g.borderOn() ? "ON" : "OFF",
+                        g.borderOn() ? 0xFF3DDC97 : 0xFF7C8B99);
                 set(yellowButton, "YELLOW", g.yellowOn() ? "ON" : "OFF",
                         g.yellowOn() ? 0xFFFFC020 : 0xFF7C8B99);
                 set(cyanButton, "CYAN", g.cyanOn() ? "ON" : "OFF",
@@ -340,6 +375,20 @@ class ControlPanel {
                 set(bankButton, "BANKS", String.valueOf(g.bankCount()), 0xFFBFD3E3);
                 set(widthButton, "WIDTH", g.thickAimOn() ? "THICK" : "THIN",
                         0xFFBFD3E3);
+
+                if (editButton != null) {
+                    if (g.isCalibrating()) {
+                        editButton.setText("SAVE");
+                        editButton.setTextColor(0xFFFFC020);
+                    } else {
+                        editButton.setText(g.hasManualRect() ? "EDIT (SAVED)" : "EDIT BORDER");
+                        editButton.setTextColor(g.hasManualRect() ? 0xFF3DDC97 : 0xFFBFD3E3);
+                    }
+                }
+                if (resetButton != null) {
+                    resetButton.setText("RESET");
+                    resetButton.setTextColor(0xFFBFD3E3);
+                }
             }
         });
     }
