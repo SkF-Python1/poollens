@@ -10,30 +10,24 @@ import android.view.View;
 import android.view.WindowManager;
 
 /**
- * Click-through overlay canvas that draws the three shot lines over the game.
+ * Click-through overlay canvas that draws the shot lines over the game.
  *
- * A plain View is used (not a SurfaceView): a SurfaceView is composited on its
- * own hardware layer, which on Android 12+ counts as an opaque obscuring
- * surface and makes taps unreliable. A normal View shares the window's
- * translucent surface instead.
+ * COORDINATE SPACE:
+ *   - Detector works in CAPTURE pixels (e.g. 1600x1068).
+ *   - Overlay view is MATCH_PARENT at screen resolution (e.g. 3200x2136).
+ *   - vx(capX) = capX * (screenW / capW)  [overlay starts at screen origin 0,0]
  *
- * The table border, the manual border calibration and the per-ball rings were
- * all REMOVED. The border was never aligned with the game's cloth and only got
- * in the way, and the ball rings needed a colour blob pass that flickered. What
- * remains is the shot geometry:
- *
- *   WHITE  cue ball aim line, cue centre -> ghost ball (stops at contact)
- *   AMBER  target ball path, from the target centre along the line of centres
- *   CYAN   cue ball path AFTER the contact (its velocity minus the part spent
- *          on the target), from the ghost centre
- *
- * All three fold off the cushions (BANKS) and can be thickened (WIDTH).
+ * LINES DRAWN:
+ *   YELLOW  target ball path: from just past target ball along line-of-centers.
+ *           This is the MAIN feature. ON by default.
+ *   CYAN    cue ball path after contact. OFF by default.
+ *   WHITE   cue ball aim line to ghost ball. OFF by default.
  */
 class GuideOverlay {
 
     private static final String TAG = "PoolLens";
 
-    /** Visual debug markers (target/ghost/cue rings + readout). Off for release. */
+    /** Visual debug: draw rings at detected positions. */
     static final boolean DEBUG_VIS = false;
 
     private final Context ctx;
@@ -48,203 +42,84 @@ class GuideOverlay {
     /** When false the guide keeps running but draws nothing (paused). */
     private volatile boolean enabled = true;
 
-    /** True while a redraw is wanted on every display frame (dash animation). */
-    private volatile boolean animating;
-
-    /** Layers, toggled from the panel. Yellow is ON by default; cyan & white are OFF by default. */
-    private volatile boolean showAim = true;
+    /** Layers, toggled from the panel. Yellow ON; cyan & white OFF by default. */
+    private volatile boolean showAim    = true;
     private volatile boolean showYellow = true;
-    private volatile boolean showCyan = false;
-    private volatile boolean showWhite = false;
-    /** When on, every aim line is drawn wider so it reads over a busy table. */
+    private volatile boolean showCyan   = false;
+    private volatile boolean showWhite  = false;
+    /** When on, every aim line is drawn wider. */
     private volatile boolean thickAim;
 
-    /** How many cushions every line folds off. User adjustable (BANKS). */
+    /** How many cushions every line folds off. */
     private int bankCount = 2;
 
-    private final AimLine.Segment[] segs = new AimLine.Segment[8];
-    /**
-     * Scratch for the AMBER (target ball) path. Kept apart from {@link #segs}
-     * so the amber line and the cue-ball lines can never overwrite each other's
-     * segments - the three lines are computed and drawn independently.
-     */
+    private final AimLine.Segment[] segs    = new AimLine.Segment[8];
     private final AimLine.Segment[] objSegs = new AimLine.Segment[8];
 
-    /** Stroke widths, normal vs thickened, in view pixels. */
-    private static final float AIM_W = 6f;
-    private static final float AIM_W_THICK = 12f;
-    private static final float BANK_W = 7f;
+    // Stroke widths
+    private static final float AIM_W        = 6f;
+    private static final float AIM_W_THICK  = 12f;
+    private static final float BANK_W       = 7f;
     private static final float BANK_W_THICK = 13f;
-    private static final float OBJ_W = 9f;
-    private static final float OBJ_W_THICK = 15f;
+    private static final float OBJ_W        = 10f;
+    private static final float OBJ_W_THICK  = 18f;
 
-    /** Capture buffer size, so drawn geometry can be mapped into view space. */
+    /** Capture size. */
     volatile int capW;
     volatile int capH;
-    /** Real screen size in pixels, which capture pixels map onto. */
+    /** Real screen size. */
     volatile int screenW;
     volatile int screenH;
 
-    void setCaptureSize(int w, int h) {
-        capW = w;
-        capH = h;
-        invalidate();
+    void setCaptureSize(int w, int h) { capW = w; capH = h; invalidate(); }
+    void setScreenSize (int w, int h) { screenW = w; screenH = h; invalidate(); }
+
+    // ---------------------------------------------------------------- transforms
+
+    /** Capture-space X → view (screen) pixels. */
+    private float vx(float capX) {
+        return (capW > 0 && screenW > 0) ? capX * (float) screenW / capW : capX;
     }
 
-    void setScreenSize(int w, int h) {
-        screenW = w;
-        screenH = h;
-        invalidate();
+    private float vy(float capY) {
+        return (capH > 0 && screenH > 0) ? capY * (float) screenH / capH : capY;
     }
 
-    /** Capture->screen scale factors. */
-    private float capToScreenX() {
-        return (capW > 0 && screenW > 0) ? (float) screenW / capW : 1f;
+    /** Scale a capture-space length to view length. */
+    private float vLen(float capLen) {
+        float sx = (capW > 0 && screenW > 0) ? (float) screenW / capW : 1f;
+        float sy = (capH > 0 && screenH > 0) ? (float) screenH / capH : 1f;
+        return capLen * Math.min(sx, sy);
     }
 
-    private float capToScreenY() {
-        return (capH > 0 && screenH > 0) ? (float) screenH / capH : 1f;
-    }
-
-    /**
-     * Capture -> view mapping, cached once per draw pass. viewOrigin() does a
-     * layout query, so the whole pass shares one snapshot.
-     */
-    private float tfScaleX = 1f, tfScaleY = 1f, tfOrgX, tfOrgY;
-
-    private void refreshTransform() {
-        tfScaleX = capToScreenX();
-        tfScaleY = capToScreenY();
-        CanvasView v = view;
-        if (v == null) {
-            tfOrgX = tfOrgY = 0f;
-            return;
-        }
-        int[] loc = new int[2];
-        v.getLocationOnScreen(loc);
-        tfOrgX = loc[0];
-        tfOrgY = loc[1];
-    }
-
-    /** Capture-space X/Y mapped into the overlay view's own coordinates. */
-    private float viewX(float capX) {
-        return capX * tfScaleX - tfOrgX;
-    }
-
-    private float viewY(float capY) {
-        return capY * tfScaleY - tfOrgY;
-    }
-
-    /** Capture-space LENGTH scaled into view space (uniform, for radii). */
-    private float viewLen(float capLen) {
-        return capLen * Math.min(tfScaleX, tfScaleY);
-    }
+    // ---------------------------------------------------------------- lifecycle
 
     GuideOverlay(Context ctx) {
         this.ctx = ctx.getApplicationContext();
-        this.wm = (WindowManager) this.ctx.getSystemService(Context.WINDOW_SERVICE);
+        this.wm  = (WindowManager) this.ctx.getSystemService(Context.WINDOW_SERVICE);
     }
 
-    /**
-     * Detected table rect mapped into view space.
-     *
-     * Detection works in CAPTURE pixels (whole screen). The overlay View is not
-     * laid out over the whole screen - with a landscape nav bar its frame is
-     * inset - so drawing capture coordinates straight into it shifts and
-     * stretches everything. Mapping through capture->screen scale and the
-     * view's screen origin fixes that.
-     */
-    private void tableRect(Detector.Result r, float[] out) {
-        out[0] = r.tableLeft;
-        out[1] = r.tableTop;
-        out[2] = r.tableRight;
-        out[3] = r.tableBottom;
-        CanvasView v = view;
-        if (v == null) return;
-        final int capW2 = capW, capH2 = capH;
-        if (capW2 <= 0 || capH2 <= 0 || screenW <= 0 || screenH <= 0) return;
-        final float csx = (float) screenW / capW2;
-        final float csy = (float) screenH / capH2;
-        out[0] = out[0] * csx - tfOrgX;
-        out[2] = out[2] * csx - tfOrgX;
-        out[1] = out[1] * csy - tfOrgY;
-        out[3] = out[3] * csy - tfOrgY;
-    }
+    boolean isEnabled()          { return enabled; }
+    void    setEnabled(boolean v){ enabled = v; invalidate(); }
+    boolean toggleEnabled()      { enabled = !enabled; invalidate(); return enabled; }
 
-    boolean isEnabled() {
-        return enabled;
-    }
+    boolean aimOn()      { return showAim; }
+    boolean toggleAim()  { showAim = !showAim; invalidate(); return showAim; }
 
-    void setEnabled(boolean on) {
-        enabled = on;
-        invalidate();
-    }
+    boolean yellowOn()     { return showYellow; }
+    boolean toggleYellow() { showYellow = !showYellow; invalidate(); return showYellow; }
 
-    /** Flips the guide on/off and returns the new state. */
-    boolean toggleEnabled() {
-        enabled = !enabled;
-        invalidate();
-        return enabled;
-    }
+    boolean cyanOn()     { return showCyan; }
+    boolean toggleCyan() { showCyan = !showCyan; invalidate(); return showCyan; }
 
-    boolean toggleAim() {
-        showAim = !showAim;
-        invalidate();
-        return showAim;
-    }
+    boolean whiteOn()     { return showWhite; }
+    boolean toggleWhite() { showWhite = !showWhite; invalidate(); return showWhite; }
 
-    boolean aimOn() {
-        return showAim;
-    }
+    boolean thickAimOn()     { return thickAim; }
+    boolean toggleThickAim() { thickAim = !thickAim; invalidate(); return thickAim; }
 
-    boolean yellowOn() {
-        return showYellow;
-    }
-
-    boolean toggleYellow() {
-        showYellow = !showYellow;
-        invalidate();
-        return showYellow;
-    }
-
-    boolean cyanOn() {
-        return showCyan;
-    }
-
-    boolean toggleCyan() {
-        showCyan = !showCyan;
-        invalidate();
-        return showCyan;
-    }
-
-    boolean whiteOn() {
-        return showWhite;
-    }
-
-    boolean toggleWhite() {
-        showWhite = !showWhite;
-        invalidate();
-        return showWhite;
-    }
-
-    boolean thickAimOn() {
-        return thickAim;
-    }
-
-    boolean toggleThickAim() {
-        thickAim = !thickAim;
-        invalidate();
-        return thickAim;
-    }
-
-    void setBankCount(int n) {
-        bankCount = Math.max(0, Math.min(6, n));
-        invalidate();
-    }
-
-    int bankCount() {
-        return bankCount;
-    }
+    void setBankCount(int n) { bankCount = Math.max(0, Math.min(6, n)); invalidate(); }
+    int  bankCount()         { return bankCount; }
 
     private void invalidate() {
         CanvasView v = view;
@@ -265,12 +140,7 @@ class GuideOverlay {
                         | WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN,
                 android.graphics.PixelFormat.TRANSLUCENT);
         lp.gravity = android.view.Gravity.TOP | android.view.Gravity.START;
-
-        // Android 12+ treats a touch as "obscured" when an overlay above it is
-        // more opaque than settings:maximum_obscuring_opacity_for_touch
-        // (default 0.8). Unity games drop obscured touches, so a fully opaque
-        // full-screen window silently kills all input. Stay just under it.
-        lp.alpha = 0.79f;
+        lp.alpha   = 0.99f;
 
         view = new CanvasView(ctx);
         try {
@@ -285,14 +155,10 @@ class GuideOverlay {
 
     void hide() {
         if (view != null && shown) {
-            try {
-                wm.removeView(view);
-            } catch (Exception ignored) {
-            }
+            try { wm.removeView(view); } catch (Exception ignored) {}
         }
-        view = null;
+        view  = null;
         shown = false;
-        animating = false;
     }
 
     /** Called from the capture thread; drawing happens on the UI thread. */
@@ -302,369 +168,337 @@ class GuideOverlay {
         if (v != null) v.postInvalidate();
     }
 
-    /** Plain View so the overlay never claims an independent opaque layer. */
+    // ---------------------------------------------------------------- canvas view
+
     private final class CanvasView extends View {
 
-        private final Paint text = new Paint(Paint.ANTI_ALIAS_FLAG);
-        private final Paint aim = new Paint(Paint.ANTI_ALIAS_FLAG);
-        private final Paint dot = new Paint(Paint.ANTI_ALIAS_FLAG);
-        /** Animation phase of the dashed strike line behind the cue ball. */
-        private float dashPhase;
+        private final Paint linePaint = new Paint(Paint.ANTI_ALIAS_FLAG);
+        private final Paint dotPaint  = new Paint(Paint.ANTI_ALIAS_FLAG);
+        private final Paint dbgPaint  = new Paint(Paint.ANTI_ALIAS_FLAG);
 
-        private Detector.Result displayed;
-        private int aimHoldFrames = 0;
-        private static final int MAX_HOLD_FRAMES = 6;
+        /** Smooth-hold for the aim angle. */
+        private float smoothAimAngle = Float.NaN;
+        private static final int AIM_HOLD = 8;
+        private int holdCounter;
+        private Detector.Result heldResult;
 
         CanvasView(Context c) {
             super(c);
             setWillNotDraw(false);
 
-            text.setColor(Color.WHITE);
-            text.setTextSize(32f);
-            text.setShadowLayer(3f, 1f, 1f, 0xFF000000);
+            linePaint.setStyle(Paint.Style.STROKE);
+            linePaint.setStrokeCap(Paint.Cap.ROUND);
+            linePaint.setStrokeJoin(Paint.Join.ROUND);
+            linePaint.setAntiAlias(true);
 
-            aim.setStyle(Paint.Style.STROKE);
-            dot.setStyle(Paint.Style.FILL);
+            dotPaint.setStyle(Paint.Style.FILL);
+            dotPaint.setAntiAlias(true);
+
+            dbgPaint.setStyle(Paint.Style.STROKE);
+            dbgPaint.setStrokeWidth(5f);
+            dbgPaint.setAntiAlias(true);
         }
 
         @Override
         protected void onDraw(Canvas c) {
             super.onDraw(c);
             c.drawColor(Color.TRANSPARENT, PorterDuff.Mode.CLEAR);
+
             if (!enabled) {
-                displayed = null;
-                aimHoldFrames = 0;
+                heldResult  = null;
+                holdCounter = 0;
                 return;
             }
 
-            Detector.Result r = last;
-            if (r == null || !r.tableFound) {
-                displayed = null;
-                aimHoldFrames = 0;
+            Detector.Result raw = last;
+            if (raw == null || !raw.tableFound) {
+                heldResult  = null;
+                holdCounter = 0;
                 return;
             }
 
-            dashPhase = (android.os.SystemClock.uptimeMillis() * 0.06f) % 26f;
-
-            if (r.aimFound && r.cue != null && !Float.isNaN(r.aimAngle)) {
-                if (displayed == null || displayed.cue == null
-                        || Math.hypot(r.cue.x - displayed.cue.x, r.cue.y - displayed.cue.y) > 25f) {
-                    displayed = r.copy();
+            // --- Aim smoothing + hold ---
+            Detector.Result r = null;
+            if (raw.aimFound && raw.cue != null && !Float.isNaN(raw.aimAngle)) {
+                if (!Float.isNaN(smoothAimAngle)) {
+                    float delta = angleDelta(raw.aimAngle, smoothAimAngle);
+                    smoothAimAngle += delta * (Math.abs(delta) < 0.12f ? 0.5f : 1f);
                 } else {
-                    displayed.tableFound = r.tableFound;
-                    displayed.tableLeft = r.tableLeft;
-                    displayed.tableTop = r.tableTop;
-                    displayed.tableRight = r.tableRight;
-                    displayed.tableBottom = r.tableBottom;
-                    displayed.cue = r.cue;
-                    displayed.stickAngle = r.stickAngle;
-
-                    float dAng = angleDeltaRad(r.aimAngle, displayed.aimAngle);
-                    if (Math.abs(dAng) < 0.09f) {
-                        displayed.aimAngle += dAng * 0.60f;
-                    } else {
-                        displayed.aimAngle = r.aimAngle;
-                    }
-
-                    if (r.aimTarget != null) {
-                        displayed.aimTarget = r.aimTarget;
-                        displayed.ghostX = r.ghostX;
-                        displayed.ghostY = r.ghostY;
-                        displayed.targetAngle = r.targetAngle;
-                        displayed.stubTipX = r.stubTipX;
-                        displayed.stubTipY = r.stubTipY;
-                        displayed.cueReboundAngle = r.cueReboundAngle;
-                    } else {
-                        displayed.aimTarget = null;
-                        displayed.ghostX = Float.NaN;
-                        displayed.ghostY = Float.NaN;
-                        displayed.targetAngle = Float.NaN;
-                        displayed.stubTipX = Float.NaN;
-                        displayed.stubTipY = Float.NaN;
-                        displayed.cueReboundAngle = Float.NaN;
-                    }
+                    smoothAimAngle = raw.aimAngle;
                 }
-                aimHoldFrames = MAX_HOLD_FRAMES;
-            } else if (aimHoldFrames > 0) {
-                aimHoldFrames--;
+                Detector.Result copy = raw.copy();
+                copy.aimAngle = smoothAimAngle;
+                heldResult  = copy;
+                holdCounter = AIM_HOLD;
+                r = heldResult;
+            } else if (holdCounter > 0) {
+                holdCounter--;
+                r = heldResult;
             } else {
-                displayed = null;
+                smoothAimAngle = Float.NaN;
+                heldResult  = null;
             }
 
-            if (displayed == null || !displayed.aimFound) return;
+            if (r == null || !r.aimFound) return;
 
             InkMask.begin();
-            refreshTransform();
-
-            if (showAim) {
-                drawAim(c, displayed);
-            }
-
+            if (showAim) drawAimLines(c, r);
             InkMask.commit();
         }
 
-        private float angleDeltaRad(float target, float current) {
-            float d = (target - current) % (2f * (float) Math.PI);
-            if (d > (float) Math.PI) d -= 2f * (float) Math.PI;
+        private float angleDelta(float a, float b) {
+            float d = (a - b) % (2f * (float) Math.PI);
+            if (d >  (float) Math.PI) d -= 2f * (float) Math.PI;
             if (d < -(float) Math.PI) d += 2f * (float) Math.PI;
             return d;
         }
 
-        /** Inverse of the draw-time mapping, back into capture pixels. */
-        private void toCapture(float vx, float vy, float[] out) {
-            float sx = capToScreenX();
-            float sy = capToScreenY();
-            out[0] = (vx + tfOrgX) / (sx == 0f ? 1f : sx);
-            out[1] = (vy + tfOrgY) / (sy == 0f ? 1f : sy);
-        }
+        // ---------------------------------------------------------------- main draw
 
-        /**
-         * Draws in VIEW space and records the same stroke in CAPTURE space.
-         *
-         * The two spaces differ when the capture is downscaled and when the
-         * view is inset, so the conversion happens in exactly one place. Mixing
-         * the two double-transforms every stroke.
-         */
-        private void drawLineV(Canvas c, Paint p,
-                               float x1, float y1, float x2, float y2) {
-            c.drawLine(x1, y1, x2, y2, p);
-            final float kx = tfScaleX == 0f ? 1f : tfScaleX;
-            final float ky = tfScaleY == 0f ? 1f : tfScaleY;
-            InkMask.line((x1 + tfOrgX) / kx, (y1 + tfOrgY) / ky,
-                    (x2 + tfOrgX) / kx, (y2 + tfOrgY) / ky, p.getStrokeWidth());
-        }
+        private void drawAimLines(Canvas c, Detector.Result r) {
+            if (r.cue == null || Float.isNaN(r.aimAngle)) return;
 
-        private void drawCircleV(Canvas c, Paint p, float x, float y, float r) {
-            c.drawCircle(x, y, r, p);
-            final float kx = tfScaleX == 0f ? 1f : tfScaleX;
-            final float ky = tfScaleY == 0f ? 1f : tfScaleY;
-            InkMask.circle((x + tfOrgX) / kx, (y + tfOrgY) / ky,
-                    r / Math.min(kx, ky), p.getStrokeWidth());
-        }
+            // Table rect
+            final float tL = vx(r.tableLeft);
+            final float tT = vy(r.tableTop);
+            final float tR = vx(r.tableRight);
+            final float tB = vy(r.tableBottom);
+            if (tR - tL < 4f || tB - tT < 4f) return;
 
-        /**
-         * Draws the three independent shot lines.
-         *
-         * Geometry (all in view space, so it shares the cushion rect with every
-         * other stroke):
-         *   WHITE cue ball: cue centre -> ghost ball, stopping at contact.
-         *   AMBER target  : from the target centre along the line of centres
-         *                   (the object ball's direction for a frictionless
-         *                   collision), NOT the aim angle.
-         *   CYAN  cue     : from the ghost centre, the cue velocity minus its
-         *                   line-of-centres component.
-         */
-        private void drawAim(Canvas c, Detector.Result r) {
-            if (r.cue == null || !r.aimFound || Float.isNaN(r.aimAngle)) return;
+            // Cue ball
+            final float cueX = vx(r.cue.x);
+            final float cueY = vy(r.cue.y);
+            final float cueR = Math.max(10f, vLen(r.cue.radius));
 
-            float[] t = new float[4];
-            tableRect(r, t);
-            final float L = t[0], TP = t[1], R = t[2], B = t[3];
-            if (R - L < 4f || B - TP < 4f) return;
+            // Aim direction
+            final float aimDx = (float) Math.cos(r.aimAngle);
+            final float aimDy = (float) Math.sin(r.aimAngle);
 
-            final float cueX = viewX(r.cue.x);
-            final float cueY = viewY(r.cue.y);
-            final float cueR = Math.max(6f, viewLen(r.cue.radius));
+            // Ghost / target
+            final boolean hasGhost  = !Float.isNaN(r.ghostX) && !Float.isNaN(r.ghostY);
+            final boolean hasTarget = r.aimTarget != null && hasGhost;
 
-            final float dx = (float) Math.cos(r.aimAngle);
-            final float dy = (float) Math.sin(r.aimAngle);
+            final float ghostX = hasGhost ? vx(r.ghostX) : cueX + aimDx * 300f;
+            final float ghostY = hasGhost ? vy(r.ghostY) : cueY + aimDy * 300f;
 
-            // Cue track: straight cue -> ghost, or cue -> cushion when no ball
-            // is on the line. rayToCushion is only the fallback length.
-            float dirx = dx, diry = dy;
-            float len = AimLine.rayToCushion(cueX, cueY, r.aimAngle, cueR,
-                    L, TP, R, B, 100000f);
-
-            boolean hasTarget = r.aimTarget != null && !Float.isNaN(r.ghostX);
-            final float gx, gy;
-            if (hasTarget) {
-                gx = viewX(r.ghostX);
-                gy = viewY(r.ghostY);
-                float gd = (float) Math.hypot(gx - cueX, gy - cueY);
-                if (gd > 0.5f) {
-                    len = gd;
-                    dirx = (gx - cueX) / gd;
-                    diry = (gy - cueY) / gd;
-                }
-            } else {
-                gx = gy = 0f;
-            }
-
-            // Strike line & WHITE cue aim line:
+            // WHITE line
             if (showWhite) {
-                float bx, by;
-                if (!Float.isNaN(r.stickAngle)) {
-                    bx = -(float) Math.cos(r.stickAngle);
-                    by = -(float) Math.sin(r.stickAngle);
-                } else {
-                    bx = -dx;
-                    by = -dy;
-                }
-                float backLen = AimLine.rayToCushion(cueX, cueY,
-                        (float) Math.atan2(by, bx), cueR, L, TP, R, B, 100000f);
-                if (Float.isNaN(r.stickAngle)) backLen = Math.min(backLen, 260f);
-
-                aim.setColor(0x99FFFFFF);
-                aim.setStrokeWidth(thickAim ? 6f : 4f);
-                final float sx0 = cueX + bx * (cueR + 3f);
-                final float sy0 = cueY + by * (cueR + 3f);
-                final float segLen = 13f;
-                for (float d = 0; d < backLen; d += 26f) {
-                    float a0 = d + dashPhase;
-                    float a1 = Math.min(a0 + segLen, backLen);
-                    if (a1 <= a0) break;
-                    drawLineV(c, aim, sx0 + bx * a0, sy0 + by * a0,
-                            sx0 + bx * a1, sy0 + by * a1);
-                }
-
-                // WHITE cue aim line, cue -> ghost (or cushion).
-                aim.setColor(0xFFFFFFFF);
-                aim.setStrokeWidth(thickAim ? AIM_W_THICK : AIM_W);
-                drawLineV(c, aim, cueX, cueY, cueX + dirx * len, cueY + diry * len);
+                drawWhiteLine(c, cueX, cueY, cueR, ghostX, ghostY, r, tL, tT, tR, tB);
             }
 
-            // Ghost ball ring
+            // Ghost ring
             if (hasTarget && (showWhite || showCyan || showYellow)) {
-                aim.setColor(0xB4FFFFFF);
-                aim.setStrokeWidth(4f);
-                drawCircleV(c, aim, gx, gy, cueR);
+                linePaint.setColor(0xB0FFFFFF);
+                linePaint.setStrokeWidth(thickAim ? 5f : 3f);
+                drawAndMaskCircle(c, linePaint, ghostX, ghostY, cueR * 0.8f);
             }
 
-            // Cue ball's path AFTER the contact (CYAN), from the ghost centre.
-            if (showCyan && hasTarget) {
-                float qAng = Float.NaN;
-                if (!Float.isNaN(r.cueReboundAngle)) {
-                    qAng = r.cueReboundAngle;
-                } else {
-                    Detector.Ball tgt = r.aimTarget;
-                    float ox = viewX(tgt.x) - gx;
-                    float oy = viewY(tgt.y) - gy;
-                    float od = (float) Math.hypot(ox, oy);
-                    if (od > 0.5f) {
-                        float oxu = ox / od, oyu = oy / od;
-                        float ax = (float) Math.cos(r.aimAngle);
-                        float ay = (float) Math.sin(r.aimAngle);
-                        float dotNA = ax * oxu + ay * oyu;
-                        float qx = ax - dotNA * oxu;
-                        float qy = ay - dotNA * oyu;
-                        float qd = (float) Math.hypot(qx, qy);
-                        if (qd > 0.05f) {
-                            qAng = (float) Math.atan2(qy / qd, qx / qd);
-                        }
-                    }
-                }
-                if (!Float.isNaN(qAng)) {
-                    final float qw = thickAim ? OBJ_W_THICK : OBJ_W;
-                    runShot(c, aim, segs, gx, gy, qAng,
-                            Math.max(3f, cueR), L, TP, R, B,
-                            0xCC66E0FF, qw, bankCount);
-                }
-            }
-
-            // Cue-ball rail path when NO object ball is on the line (a kick).
-            if (showCyan && bankCount > 0 && !hasTarget) {
-                runShot(c, aim, segs, cueX, cueY, r.aimAngle, cueR,
-                        L, TP, R, B, 0xEE7FD4FF,
-                        thickAim ? BANK_W_THICK : BANK_W, bankCount);
-            }
-
-            // AMBER / YELLOW target-ball path (the main focus), painted LAST.
+            // YELLOW
             if (showYellow && hasTarget) {
-                drawTargetPath(c, r, gx, gy, L, TP, R, B);
+                drawYellowLine(c, r, ghostX, ghostY, cueR, tL, tT, tR, tB);
             }
 
-            aim.setStyle(Paint.Style.STROKE);
+            // CYAN after-contact
+            if (showCyan && hasTarget) {
+                drawCyanLine(c, r, ghostX, ghostY, cueR, aimDx, aimDy, tL, tT, tR, tB);
+            }
+
+            // CYAN kick (no target)
+            if (showCyan && !hasTarget && bankCount > 0) {
+                runAndPaint(c, linePaint, segs, cueX, cueY, r.aimAngle, cueR,
+                        tL, tT, tR, tB, 0xEE7FD4FF, thickAim ? BANK_W_THICK : BANK_W, bankCount);
+            }
+
+            // Debug
+            if (DEBUG_VIS) {
+                dbgPaint.setColor(0xFFFF0000);
+                drawAndMaskCircle(c, dbgPaint, cueX, cueY, cueR + 4f);
+                if (hasGhost) {
+                    dbgPaint.setColor(0xFF00FF00);
+                    drawAndMaskCircle(c, dbgPaint, ghostX, ghostY, cueR + 4f);
+                }
+                if (hasTarget) {
+                    dbgPaint.setColor(0xFFFF8800);
+                    drawAndMaskCircle(c, dbgPaint, vx(r.aimTarget.x), vy(r.aimTarget.y), cueR + 4f);
+                }
+            }
         }
 
-        /**
-         * AMBER: the target ball's outgoing path, from its centre along the
-         * line of centres (ghost -> target), folded off the cushions.
-         */
-        private void drawTargetPath(Canvas c, Detector.Result r,
-                                    float gx, float gy,
-                                    float L, float TP, float R, float B) {
-            Detector.Ball tgt = r.aimTarget;
-            if (tgt == null || Float.isNaN(r.ghostX)) return;
+        // ---------------------------------------------------------------- WHITE
 
-            final float tx = viewX(tgt.x);
-            final float ty = viewY(tgt.y);
-            final float tR = Math.max(6f, viewLen(tgt.radius));
-
-            float ang;
-            if (!Float.isNaN(r.targetAngle)) {
-                ang = r.targetAngle;
-            } else {
-                float ox = tx - gx;
-                float oy = ty - gy;
-                float od = (float) Math.hypot(ox, oy);
-                if (od < 0.5f) return;
-                ang = (float) Math.atan2(oy, ox);
+        private void drawWhiteLine(Canvas c,
+                                   float cueX, float cueY, float cueR,
+                                   float ghostX, float ghostY,
+                                   Detector.Result r,
+                                   float tL, float tT, float tR, float tB) {
+            // Back-track dashes behind cue ball
+            if (!Float.isNaN(r.stickAngle)) {
+                float bx = -(float) Math.cos(r.stickAngle);
+                float by = -(float) Math.sin(r.stickAngle);
+                float ang = (float) Math.atan2(by, bx);
+                float backLen = AimLine.rayToCushion(cueX, cueY, ang, cueR,
+                        tL, tT, tR, tB, 100000f);
+                linePaint.setColor(0x80FFFFFF);
+                linePaint.setStrokeWidth(thickAim ? 5f : 3f);
+                drawAndMaskLine(c, linePaint,
+                        cueX + bx * cueR, cueY + by * cueR,
+                        cueX + bx * (cueR + backLen), cueY + by * (cueR + backLen));
             }
 
+            // Cue → ghost solid line
+            float gd = (float) Math.hypot(ghostX - cueX, ghostY - cueY);
+            if (gd < 2f) return;
+            float dx = (ghostX - cueX) / gd;
+            float dy = (ghostY - cueY) / gd;
+            linePaint.setColor(0xFFFFFFFF);
+            linePaint.setStrokeWidth(thickAim ? AIM_W_THICK : AIM_W);
+            drawAndMaskLine(c, linePaint,
+                    cueX + dx * cueR, cueY + dy * cueR,
+                    ghostX, ghostY);
+        }
+
+        // ---------------------------------------------------------------- YELLOW
+
+        /**
+         * YELLOW = target ball path.
+         *
+         * Direction: ghost → target (line of centers, pure billiard physics).
+         * Start:     far edge of target ball (facing away from ghost).
+         *
+         * No stub-fitting. No ghost-ball ring scan. Pure geometry.
+         * This is always correct if the ghost/target detection is correct.
+         */
+        private void drawYellowLine(Canvas c, Detector.Result r,
+                                    float ghostX, float ghostY, float cueR,
+                                    float tL, float tT, float tR, float tB) {
+            if (r.aimTarget == null) return;
+
+            final float tx   = vx(r.aimTarget.x);
+            final float ty   = vy(r.aimTarget.y);
+            final float tRad = Math.max(cueR * 0.8f, vLen(r.aimTarget.radius));
+
+            final float ang;
             final float startX;
             final float startY;
-            final float inset;
-            if (!Float.isNaN(r.stubTipX) && !Float.isNaN(r.stubTipY)) {
-                startX = viewX(r.stubTipX);
-                startY = viewY(r.stubTipY);
-                inset = 0f;
+
+            if (!Float.isNaN(r.stubTipX) && !Float.isNaN(r.stubTipY) && !Float.isNaN(r.targetAngle)) {
+                // Seamless extension: start directly at the tip of the game's own white stub!
+                startX = vx(r.stubTipX);
+                startY = vy(r.stubTipY);
+                ang = r.targetAngle;
             } else {
-                startX = tx;
-                startY = ty;
-                inset = tR;
+                // Direction ghost → target fallback
+                float dx = tx - ghostX;
+                float dy = ty - ghostY;
+                float d  = (float) Math.hypot(dx, dy);
+                if (d < 2f) return;
+                dx /= d;
+                dy /= d;
+                ang = !Float.isNaN(r.targetAngle) ? r.targetAngle : (float) Math.atan2(dy, dx);
+                startX = tx + dx * tRad;
+                startY = ty + dy * tRad;
             }
 
-            final int n = runShot(c, aim, objSegs, startX, startY, ang, inset,
-                    L, TP, R, B, 0xFFFFC020,
-                    thickAim ? OBJ_W_THICK : OBJ_W, bankCount);
-            if (n <= 0 || objSegs[0] == null) return;
-            AimLine.Segment s0 = objSegs[Math.min(n, objSegs.length) - 1];
-            float angEnd = (float) Math.atan2(s0.y2 - s0.y1, s0.x2 - s0.x1);
+            // Log for diagnostics
+            Log.d(TAG, String.format("yellow: ghost(%.0f,%.0f) tgt(%.0f,%.0f) start(%.0f,%.0f) ang=%.1fdeg",
+                    ghostX, ghostY, tx, ty, startX, startY,
+                    Math.toDegrees(ang)));
 
-            aim.setColor(0xFFFFC020);
-            aim.setStrokeWidth(thickAim ? OBJ_W_THICK : OBJ_W);
-            final float head = 34f, spread = 0.40f;
-            drawLineV(c, aim, s0.x2, s0.y2,
-                    s0.x2 - head * (float) Math.cos(angEnd - spread),
-                    s0.y2 - head * (float) Math.sin(angEnd - spread));
-            drawLineV(c, aim, s0.x2, s0.y2,
-                    s0.x2 - head * (float) Math.cos(angEnd + spread),
-                    s0.y2 - head * (float) Math.sin(angEnd + spread));
+            int n = runAndPaint(c, linePaint, objSegs, startX, startY, ang, 0f,
+                    tL, tT, tR, tB, 0xFFFFC020, thickAim ? OBJ_W_THICK : OBJ_W, bankCount);
 
-            if (DEBUG_VIS) {
-                dot.setStyle(Paint.Style.STROKE);
-                dot.setStrokeWidth(5f);
-                dot.setColor(0xFFFF2222);
-                drawCircleV(c, dot, tx, ty, 30f);      // target centre
-                dot.setColor(0xFF00E5FF);
-                drawCircleV(c, dot, s0.x2, s0.y2, 28f); // amber endpoint
+            drawArrowHead(c, n);
+
+            // Small dot at target ball center
+            dotPaint.setColor(0xFFFFC020);
+            c.drawCircle(tx, ty, Math.max(5f, tRad * 0.25f), dotPaint);
+        }
+
+        // ---------------------------------------------------------------- CYAN
+
+        private void drawCyanLine(Canvas c, Detector.Result r,
+                                  float ghostX, float ghostY, float cueR,
+                                  float aimDx, float aimDy,
+                                  float tL, float tT, float tR, float tB) {
+            float qAng = Float.NaN;
+            if (!Float.isNaN(r.cueReboundAngle)) {
+                qAng = r.cueReboundAngle;
+            } else if (r.aimTarget != null) {
+                float tx   = vx(r.aimTarget.x);
+                float ty   = vy(r.aimTarget.y);
+                float ox   = tx - ghostX;
+                float oy   = ty - ghostY;
+                float od   = (float) Math.hypot(ox, oy);
+                if (od > 0.5f) {
+                    float oxu = ox / od;
+                    float oyu = oy / od;
+                    float dot = aimDx * oxu + aimDy * oyu;
+                    float qx  = aimDx - dot * oxu;
+                    float qy  = aimDy - dot * oyu;
+                    float qd  = (float) Math.hypot(qx, qy);
+                    if (qd > 0.05f) qAng = (float) Math.atan2(qy / qd, qx / qd);
+                }
+            }
+            if (!Float.isNaN(qAng)) {
+                runAndPaint(c, linePaint, segs, ghostX, ghostY, qAng, cueR,
+                        tL, tT, tR, tB, 0xCC66E0FF, thickAim ? OBJ_W_THICK : OBJ_W, bankCount);
             }
         }
 
-        /**
-         * Traces a shot from (x,y) in VIEW space, folds it off the drawn
-         * cushions and paints every flight. The same rect feeds both the fold
-         * and the drawing, so the result can never leave the table.
-         *
-         * @return the number of flights painted
-         */
-        private int runShot(Canvas c, Paint p, AimLine.Segment[] out,
-                            float x, float y, float angle, float ballR,
-                            float L, float TP, float R, float B,
-                            int color, float width, int bounces) {
-            final float inset = Math.max(3f, ballR);
-            int n = AimLine.trace(x, y, angle, inset, L, TP, R, B, bounces, out);
+        // ---------------------------------------------------------------- helpers
+
+        private void drawArrowHead(Canvas c, int n) {
+            if (n <= 0) return;
+            AimLine.Segment last = objSegs[n - 1];
+            if (last == null) return;
+            float ang  = (float) Math.atan2(last.y2 - last.y1, last.x2 - last.x1);
+            float head = 44f;
+            float spr  = 0.42f;
+            linePaint.setColor(0xFFFFC020);
+            linePaint.setStrokeWidth(thickAim ? OBJ_W_THICK : OBJ_W);
+            drawAndMaskLine(c, linePaint, last.x2, last.y2,
+                    last.x2 - head * (float) Math.cos(ang - spr),
+                    last.y2 - head * (float) Math.sin(ang - spr));
+            drawAndMaskLine(c, linePaint, last.x2, last.y2,
+                    last.x2 - head * (float) Math.cos(ang + spr),
+                    last.y2 - head * (float) Math.sin(ang + spr));
+        }
+
+        private int runAndPaint(Canvas c, Paint p, AimLine.Segment[] out,
+                                float x, float y, float angle, float ballR,
+                                float tL, float tT, float tR, float tB,
+                                int color, float width, int bounces) {
+            int n = AimLine.trace(x, y, angle, ballR, tL, tT, tR, tB, bounces, out);
+            p.setColor(color);
+            p.setStrokeWidth(width);
             for (int i = 0; i < n && i < out.length; i++) {
                 AimLine.Segment s = out[i];
                 if (s == null) break;
-                p.setColor(color);
-                p.setStrokeWidth(width);
-                drawLineV(c, p, s.x1, s.y1, s.x2, s.y2);
-                dot.setColor(color);
-                dot.setStyle(Paint.Style.FILL);
-                drawCircleV(c, dot, s.x1, s.y1, 10f);
+                drawAndMaskLine(c, p, s.x1, s.y1, s.x2, s.y2);
+                dotPaint.setColor(color);
+                c.drawCircle(s.x1, s.y1, Math.max(5f, width * 0.4f), dotPaint);
             }
             return n;
+        }
+
+        // ---------------------------------------------------------------- ink mask
+
+        /** Scale factor view → capture (inverse of vx/vy). */
+        private float capSx() { return (screenW > 0 && capW > 0) ? (float) capW / screenW : 1f; }
+        private float capSy() { return (screenH > 0 && capH > 0) ? (float) capH / screenH : 1f; }
+
+        private void drawAndMaskLine(Canvas c, Paint p, float x1, float y1, float x2, float y2) {
+            c.drawLine(x1, y1, x2, y2, p);
+            float sx = capSx(), sy = capSy();
+            InkMask.line(x1 * sx, y1 * sy, x2 * sx, y2 * sy,
+                    p.getStrokeWidth() * Math.min(sx, sy));
+        }
+
+        private void drawAndMaskCircle(Canvas c, Paint p, float cx, float cy, float rad) {
+            c.drawCircle(cx, cy, rad, p);
+            float sx = capSx(), sy = capSy();
+            InkMask.circle(cx * sx, cy * sy, rad * Math.min(sx, sy),
+                    p.getStrokeWidth() * Math.min(sx, sy));
         }
     }
 }
