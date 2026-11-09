@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">PoolLens</string>
+    <string name="notif_channel_name">PoolLens Capture</string>
+    <string name="notif_title">PoolLens active</string>
+    <string name="notif_text">Capturing the table</string>
+</resources>

@@ -1,0 +1,431 @@
+
+GS_Table_Rings_Animation.png
+size: 2048,2048
+format: RGBA8888
+filter: Linear,Linear
+repeat: none
+GS_Table_Ring_1_Fill
+  rotate: false
+  xy: 10, 51
+  size: 740, 740
+  orig: 861, 861
+  offset: 61, 60
+  index: -1
+GS_Table_Ring_2_Fill
+  rotate: false
+  xy: 1439, 913
+  size: 551, 551
+  orig: 861, 861
+  offset: 156, 154
+  index: -1
+GS_Table_Ring_2_RingFill
+  rotate: false
+  xy: 1439, 352
+  size: 551, 551
+  orig: 861, 861
+  offset: 156, 154
+  index: -1
+GS_Table_Ring_2_Stroke
+  rotate: false
+  xy: 760, 240
+  size: 551, 551
+  orig: 861, 861
+  offset: 156, 154
+  index: -1
+GS_Table_Ring_4_Glow
+  rotate: false
+  xy: 1439, 1474
+  size: 561, 561
+  orig: 861, 861
+  offset: 150, 150
+  index: -1
+Light_Animation_white/GS_Table_Lights_Ring_4_Animation_00
+  rotate: false
+  xy: 2000, 1431
+  size: 37, 33
+  orig: 400, 400
+  offset: 183, 282
+  index: -1
+Light_Animation_white/GS_Table_Lights_Ring_4_Animation_01
+  rotate: true
+  xy: 1321, 390
+  size: 43, 50
+  orig: 400, 400
+  offset: 183, 281
+  index: -1
+Light_Animation_white/GS_Table_Lights_Ring_4_Animation_02
+  rotate: true
+  xy: 1321, 443
+  size: 53, 56
+  orig: 400, 400
+  offset: 183, 278
+  index: -1
+Light_Animation_white/GS_Table_Lights_Ring_4_Animation_03
+  rotate: false
+  xy: 1321, 506
+  size: 69, 66
+  orig: 400, 400
+  offset: 183, 271
+  index: -1
+Light_Animation_white/GS_Table_Lights_Ring_4_Animation_04
+  rotate: false
+  xy: 1321, 582
+  size: 93, 79
+  orig: 400, 400
+  offset: 183, 261
+  index: -1
+Light_Animation_white/GS_Table_Lights_Ring_4_Animation_05
+  rotate: true
+  xy: 1321, 671
+  size: 120, 95
+  orig: 400, 400
+  offset: 183, 247
+  index: -1
+Light_Animation_white/GS_Table_Lights_Ring_4_Animation_15
+  rotate: true
+  xy: 760, 21
+  size: 209, 296
+  orig: 400, 400
+  offset: 162, 79
+  index: -1
+Light_Animation_white/GS_Table_Lights_Ring_4_Animation_17
+  rotate: false
+  xy: 1684, 10
+  size: 278, 332
+  orig: 400, 400
+  offset: 102, 52
+  index: -1
+Light_Animation_white/GS_Table_Lights_Ring_4_Animation_18
+  rotate: true
+  xy: 1321, 19
+  size: 323, 353
+  orig: 400, 400
+  offset: 61, 35
+  index: -1
+Light_Animation_white/GS_Table_Lights_Ring_4_Animation_37
+  rotate: false
+  xy: 1066, 20
+  size: 210, 210
+  orig: 400, 400
+  offset: 95, 95
+  index: -1
+Particle_Placeholder
+  rotate: false
+  xy: 2010, 2033
+  size: 2, 2
+  orig: 2, 2
+  offset: 0, 0
+  index: -1
+Ray
+  rotate: false
+  xy: 10, 801
+  size: 1419, 1234
+  orig: 1500, 1500
+  offset: 73, 82
+  index: -1
+
+GS_Table_Rings_Animation2.png
+size: 2048,2048
+format: RGBA8888
+filter: Linear,Linear
+repeat: none
+Circle
+  rotate: false
+  xy: 10, 1231
+  size: 807, 807
+  orig: 1500, 1500
+  offset: 346, 347
+  index: -1
+GS_Table_Ring_1_2_RingFill
+  rotate: false
+  xy: 760, 481
+  size: 740, 740
+  orig: 861, 861
+  offset: 61, 60
+  index: -1
+GS_Table_Ring_1_RingFill
+  rotate: false
+  xy: 10, 481
+  size: 740, 740
+  orig: 861, 861
+  offset: 61, 60
+  index: -1
+GS_Table_Ring_1_Stroke
+  rotate: false
+  xy: 827, 1298
+  size: 740, 740
+  orig: 861, 861
+  offset: 61, 60
+  index: -1
+Light_Animation_white/GS_Table_Lights_Ring_4_Animation_06
+  rotate: true
+  xy: 1920, 1078
+  size: 141, 117
+  orig: 400, 400
+  offset: 183, 228
+  index: -1
+Light_Animation_white/GS_Table_Lights_Ring_4_Animation_13
+  rotate: true
+  xy: 1240, 10
+  size: 181, 314
+  orig: 400, 400
+  offset: 183, 53
+  index: -1
+Light_Animation_white/GS_Table_Lights_Ring_4_Animation_16
+  rotate: false
+  xy: 1240, 201
+  size: 235, 270
+  orig: 400, 400
+  offset: 140, 109
+  index: -1
+Light_Animation_white/GS_Table_Lights_Ring_4_Animation_22
+  rotate: false
+  xy: 1577, 1229
+  size: 400, 399
+  orig: 400, 400
+  offset: 0, 1
+  index: -1
+Light_Animation_white/GS_Table_Lights_Ring_4_Animation_23
+  rotate: false
+  xy: 10, 71
+  size: 400, 400
+  orig: 400, 400
+  offset: 0, 0
+  index: -1
+Light_Animation_white/GS_Table_Lights_Ring_4_Animation_24
+  rotate: false
+  xy: 1577, 1638
+  size: 400, 400
+  orig: 400, 400
+  offset: 0, 0
+  index: -1
+Light_Animation_white/GS_Table_Lights_Ring_4_Animation_25
+  rotate: false
+  xy: 420, 71
+  size: 400, 400
+  orig: 400, 400
+  offset: 0, 0
+  index: -1
+Light_Animation_white/GS_Table_Lights_Ring_4_Animation_26
+  rotate: false
+  xy: 830, 71
+  size: 400, 400
+  orig: 400, 400
+  offset: 0, 0
+  index: -1
+Light_Animation_white/GS_Table_Lights_Ring_4_Animation_27
+  rotate: false
+  xy: 1510, 819
+  size: 400, 400
+  orig: 400, 400
+  offset: 0, 0
+  index: -1
+Light_Animation_white/GS_Table_Lights_Ring_4_Animation_28
+  rotate: false
+  xy: 1510, 409
+  size: 400, 400
+  orig: 400, 400
+  offset: 0, 0
+  index: -1
+Light_Animation_white/GS_Table_Lights_Ring_4_Animation_31
+  rotate: true
+  xy: 1564, 12
+  size: 387, 386
+  orig: 400, 400
+  offset: 6, 5
+  index: -1
+
+GS_Table_Rings_Animation3.png
+size: 2048,2048
+format: RGBA8888
+filter: Linear,Linear
+repeat: none
+GS_Table_Ring_1_2_3_RingFill
+  rotate: false
+  xy: 10, 1294
+  size: 740, 740
+  orig: 861, 861
+  offset: 61, 60
+  index: -1
+GS_Table_Ring_2_3_RingFill
+  rotate: false
+  xy: 10, 733
+  size: 551, 551
+  orig: 861, 861
+  offset: 156, 154
+  index: -1
+GS_Table_Ring_3_Fill
+  rotate: false
+  xy: 973, 718
+  size: 360, 360
+  orig: 861, 861
+  offset: 252, 249
+  index: -1
+GS_Table_Ring_3_RingFill
+  rotate: false
+  xy: 1364, 885
+  size: 360, 360
+  orig: 861, 861
+  offset: 252, 249
+  index: -1
+GS_Table_Ring_3_Stroke
+  rotate: false
+  xy: 571, 517
+  size: 360, 360
+  orig: 861, 861
+  offset: 252, 249
+  index: -1
+GS_Table_Ring_3_StrokeWhite
+  rotate: false
+  xy: 941, 348
+  size: 360, 360
+  orig: 861, 861
+  offset: 252, 249
+  index: -1
+GS_Table_Ring_4_Fill
+  rotate: false
+  xy: 1734, 781
+  size: 207, 207
+  orig: 861, 861
+  offset: 327, 327
+  index: -1
+GS_Table_Ring_4_Stroke
+  rotate: false
+  xy: 1695, 566
+  size: 205, 205
+  orig: 861, 861
+  offset: 328, 328
+  index: -1
+GS_Table_Ring_Filled_Explode
+  rotate: false
+  xy: 760, 1483
+  size: 551, 551
+  orig: 861, 861
+  offset: 156, 154
+  index: -1
+Light_Animation_white/GS_Table_Lights_Ring_4_Animation_07
+  rotate: true
+  xy: 420, 565
+  size: 158, 140
+  orig: 400, 400
+  offset: 183, 207
+  index: -1
+Light_Animation_white/GS_Table_Lights_Ring_4_Animation_08
+  rotate: false
+  xy: 1811, 187
+  size: 166, 165
+  orig: 400, 400
+  offset: 183, 185
+  index: -1
+Light_Animation_white/GS_Table_Lights_Ring_4_Animation_09
+  rotate: true
+  xy: 760, 1304
+  size: 169, 190
+  orig: 400, 400
+  offset: 183, 163
+  index: -1
+Light_Animation_white/GS_Table_Lights_Ring_4_Animation_10
+  rotate: false
+  xy: 1630, 304
+  size: 171, 219
+  orig: 400, 400
+  offset: 183, 137
+  index: -1
+Light_Animation_white/GS_Table_Lights_Ring_4_Animation_11
+  rotate: false
+  xy: 1734, 998
+  size: 174, 255
+  orig: 400, 400
+  offset: 183, 104
+  index: -1
+Light_Animation_white/GS_Table_Lights_Ring_4_Animation_12
+  rotate: false
+  xy: 324, 21
+  size: 177, 292
+  orig: 400, 400
+  offset: 183, 71
+  index: -1
+Light_Animation_white/GS_Table_Lights_Ring_4_Animation_14
+  rotate: true
+  xy: 1311, 339
+  size: 184, 309
+  orig: 400, 400
+  offset: 183, 62
+  index: -1
+Light_Animation_white/GS_Table_Lights_Ring_4_Animation_19
+  rotate: false
+  xy: 1364, 1255
+  size: 360, 369
+  orig: 400, 400
+  offset: 29, 24
+  index: -1
+Light_Animation_white/GS_Table_Lights_Ring_4_Animation_20
+  rotate: true
+  xy: 973, 1088
+  size: 385, 381
+  orig: 400, 400
+  offset: 9, 16
+  index: -1
+Light_Animation_white/GS_Table_Lights_Ring_4_Animation_21
+  rotate: true
+  xy: 571, 887
+  size: 397, 392
+  orig: 400, 400
+  offset: 1, 8
+  index: -1
+Light_Animation_white/GS_Table_Lights_Ring_4_Animation_29
+  rotate: false
+  xy: 10, 323
+  size: 400, 400
+  orig: 400, 400
+  offset: 0, 0
+  index: -1
+Light_Animation_white/GS_Table_Lights_Ring_4_Animation_30
+  rotate: false
+  xy: 1321, 1634
+  size: 400, 400
+  orig: 400, 400
+  offset: 0, 0
+  index: -1
+Light_Animation_white/GS_Table_Lights_Ring_4_Animation_32
+  rotate: false
+  xy: 1343, 533
+  size: 342, 342
+  orig: 400, 400
+  offset: 29, 28
+  index: -1
+Light_Animation_white/GS_Table_Lights_Ring_4_Animation_33
+  rotate: false
+  xy: 10, 10
+  size: 304, 303
+  orig: 400, 400
+  offset: 48, 48
+  index: -1
+Light_Animation_white/GS_Table_Lights_Ring_4_Animation_34
+  rotate: false
+  xy: 1731, 1762
+  size: 273, 272
+  orig: 400, 400
+  offset: 63, 64
+  index: -1
+Light_Animation_white/GS_Table_Lights_Ring_4_Animation_35
+  rotate: false
+  xy: 1734, 1503
+  size: 249, 249
+  orig: 400, 400
+  offset: 75, 76
+  index: -1
+Light_Animation_white/GS_Table_Lights_Ring_4_Animation_36
+  rotate: false
+  xy: 1734, 1263
+  size: 230, 230
+  orig: 400, 400
+  offset: 85, 85
+  index: -1
+Light_Animation_white/GS_Table_Lights_Ring_4_Animation_38
+  rotate: false
+  xy: 1811, 362
+  size: 194, 194
+  orig: 400, 400
+  offset: 103, 103
+  index: -1

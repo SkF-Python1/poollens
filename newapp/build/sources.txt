@@ -1,0 +1,11 @@
+/mnt/data/Code/8BP/newapp/src/com/poollens/app/MainActivity.java
+/mnt/data/Code/8BP/newapp/src/com/poollens/app/CaptureConsentActivity.java
+/mnt/data/Code/8BP/newapp/src/com/poollens/app/OverlayService.java
+/mnt/data/Code/8BP/newapp/src/com/poollens/app/CaptureEngine.java
+/mnt/data/Code/8BP/newapp/src/com/poollens/app/AimLine.java
+/mnt/data/Code/8BP/newapp/src/com/poollens/app/GuideOverlay.java
+/mnt/data/Code/8BP/newapp/src/com/poollens/app/InkMask.java
+/mnt/data/Code/8BP/newapp/src/com/poollens/app/ControlPanel.java
+/mnt/data/Code/8BP/newapp/src/com/poollens/app/FrameDump.java
+/mnt/data/Code/8BP/newapp/src/com/poollens/app/Detector.java
+/mnt/data/Code/8BP/newapp/build/gen/com/poollens/app/R.java
