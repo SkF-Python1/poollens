@@ -341,8 +341,8 @@ class GuideOverlay {
                 drawWhiteLine(c, cueX, cueY, cueR, ghostX, ghostY, r, tL, tT, tR, tB);
             }
 
-            // Ghost ring
-            if (hasTarget && (showWhite || showCyan || showYellow)) {
+            // Ghost ring (only if WHITE guideline is toggled ON)
+            if (showWhite && hasTarget) {
                 linePaint.setColor(0xB0FFFFFF);
                 linePaint.setStrokeWidth(thickAim ? 5f : 3f);
                 drawAndMaskCircle(c, linePaint, ghostX, ghostY, cueR * 0.8f);
@@ -351,7 +351,7 @@ class GuideOverlay {
             // YELLOW - primary aim line, always present across all parts of table
             if (showYellow) {
                 drawYellowLine(c, r, cueX, cueY, ghostX, ghostY, cueR, aimDx, aimDy,
-                        hasGhost, hasTarget, tL, tT, tR, tB);
+                        hasTarget, tL, tT, tR, tB);
             }
 
             // CYAN after-contact
@@ -428,19 +428,16 @@ class GuideOverlay {
                                     float cueX, float cueY,
                                     float ghostX, float ghostY, float cueR,
                                     float aimDx, float aimDy,
-                                    boolean hasGhost, boolean hasTarget,
+                                    boolean hasTarget,
                                     float tL, float tT, float tR, float tB) {
             final float startX;
             final float startY;
             final float ang;
-            float tx = Float.NaN;
-            float ty = Float.NaN;
-            float tRad = cueR;
 
             if (hasTarget && r.aimTarget != null) {
-                tx   = vx(r.aimTarget.x);
-                ty   = vy(r.aimTarget.y);
-                tRad = Math.max(cueR * 0.8f, vLen(r.aimTarget.radius));
+                final float tx   = vx(r.aimTarget.x);
+                final float ty   = vy(r.aimTarget.y);
+                final float tRad = Math.max(cueR * 0.8f, vLen(r.aimTarget.radius));
 
                 if (!Float.isNaN(r.stubTipX) && !Float.isNaN(r.stubTipY) && !Float.isNaN(r.targetAngle)) {
                     // Seamless extension: start directly at the tip of the game's own white stub!
@@ -462,16 +459,8 @@ class GuideOverlay {
                     startX = tx + dx * tRad;
                     startY = ty + dy * tRad;
                 }
-            } else if (hasGhost) {
-                // Ghost ball detected but target stub was faint/unsegmented:
-                // Target ball lies directly in front of ghost ball along aim direction
-                tx = ghostX + aimDx * (cueR * 2f);
-                ty = ghostY + aimDy * (cueR * 2f);
-                startX = tx + aimDx * cueR;
-                startY = ty + aimDy * cueR;
-                ang = r.aimAngle;
             } else {
-                // Kick shot (no object ball): start at cue ball and fold off cushions!
+                // Kick / cushion shot: start at cue ball and fold off cushions!
                 startX = cueX;
                 startY = cueY;
                 ang = r.aimAngle;
@@ -481,12 +470,6 @@ class GuideOverlay {
                     tL, tT, tR, tB, 0xFFFFC020, thickAim ? OBJ_W_THICK : OBJ_W, bankCount);
 
             drawArrowHead(c, n);
-
-            // Small dot at target ball center if target exists
-            if (!Float.isNaN(tx) && !Float.isNaN(ty)) {
-                dotPaint.setColor(0xFFFFC020);
-                c.drawCircle(tx, ty, Math.max(5f, tRad * 0.25f), dotPaint);
-            }
         }
 
         // ---------------------------------------------------------------- CYAN

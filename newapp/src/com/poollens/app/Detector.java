@@ -692,13 +692,13 @@ final class Detector {
         final int tang = Math.max(2, Math.round(2 * sc));
 
         // Step 1: Trace the guideline along dirx, diry to find its termination.
-        // In 8 Ball Pool, the incoming cue line is a continuous solid line.
-        // A gap of > 10 pixels means we have hit the end of the incoming cue track.
+        // In 8 Ball Pool, the incoming cue line is a continuous solid line starting at the cue ball.
+        float firstWhiteD = -1f;
         float lastWhiteD = -1f;
         int consecMisses = 0;
         final float maxDashGap = Math.max(8f, r * 0.7f);
 
-        for (float d = r * 1.5f; d <= maxD; d += 2f) {
+        for (float d = r * 1.2f; d <= maxD; d += 2f) {
             float rx = cx + dirx * d;
             float ry = cy + diry * d;
             if (rx < tL || rx > tR || ry < tT || ry > tB) break;
@@ -716,6 +716,7 @@ final class Detector {
             }
 
             if (hit) {
+                if (firstWhiteD < 0) firstWhiteD = d;
                 lastWhiteD = d;
                 consecMisses = 0;
             } else if (lastWhiteD > 0) {
@@ -724,7 +725,10 @@ final class Detector {
             }
         }
 
-        if (lastWhiteD < r * 1.8f) return;
+        // The guideline MUST start near the cue ball and have continuous length >= 1.5 radii
+        if (firstWhiteD < 0 || firstWhiteD > r * 2.8f || (lastWhiteD - firstWhiteD) < r * 1.5f) {
+            return;
+        }
 
         // Step 2: Pinpoint the game-drawn ghost ball ring center
         float bestGhostD = lastWhiteD - r * 0.7f;
@@ -750,6 +754,12 @@ final class Detector {
                 bestRingScore = ringHits;
                 bestGhostD = testD;
             }
+        }
+
+        // A real ghost ball in 8 Ball Pool is a visible ring (24 radial samples).
+        // If fewer than 7 samples hit, there is NO ghost ball (e.g. shot to cushion).
+        if (bestRingScore < 7) {
+            return;
         }
 
         float gx = cx + dirx * bestGhostD;
@@ -825,16 +835,18 @@ final class Detector {
             float hCur = smoothHits[a];
             if (hCur < 6f || hCur < smoothHits[prev] || hCur <= smoothHits[next]) continue;
 
+            float dAim = Math.abs(angleDeltaDeg(a, aimDeg));
+
             if (rayInner[a] >= 4) {
                 // Cue rebound line starts inside / at ghost ring
-                if (hCur > bestReboundHits) {
+                if (dAim < 90f && hCur > bestReboundHits) {
                     bestReboundHits = hCur;
                     bestReboundA = a;
                     bestReboundMaxD = rayMaxD[a];
                 }
             } else if (rayMaxD[a] >= minTargetReach) {
-                // Target stub line must extend past the target ball surface
-                if (hCur > bestTargetHits) {
+                // Target stub line must extend past target ball AND be forward-moving (|angle - aim| < 85°)
+                if (dAim < 85f && hCur > bestTargetHits) {
                     bestTargetHits = hCur;
                     bestTargetA = a;
                     bestTargetMaxD = rayMaxD[a];

@@ -428,7 +428,7 @@ public class OverlayService extends Service implements CaptureEngine.Frames {
                     r.stubTipY = lastStubTipY;
                     r.cueReboundAngle = lastCueReboundAngle;
                 }
-            } else if (lastAimMs != 0 && t - lastAimMs < 2000 && lastCue != null) {
+            } else if (lastAimMs != 0 && t - lastAimMs < 1200 && lastCue != null) {
                 // If cue was momentarily missed (e.g. shadowed or during cue animation), restore last cue
                 if (r.cue == null) {
                     r.cue = lastCue;
@@ -448,6 +448,15 @@ public class OverlayService extends Service implements CaptureEngine.Frames {
                         r.cueReboundAngle = lastCueReboundAngle;
                     }
                 }
+            } else {
+                // Aim session ended: clear stale target/ghost so they never leak into idle state
+                lastAimTarget = null;
+                lastTargetAngle = Float.NaN;
+                lastGhostX = Float.NaN;
+                lastGhostY = Float.NaN;
+                lastStubTipX = Float.NaN;
+                lastStubTipY = Float.NaN;
+                lastCueReboundAngle = Float.NaN;
             }
             if (r.cue != null) lastCue = r.cue;
 
