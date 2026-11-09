@@ -611,7 +611,7 @@ final class Detector {
         int b = p & 0xFF;
         int mn = Math.min(r, Math.min(g, b));
         int mx = Math.max(r, Math.max(g, b));
-        if (mn < 180) return false;
+        if (mn < 150) return false;
         if (mx - mn > 50) return false;
         return true;
     }
@@ -1295,10 +1295,9 @@ final class Detector {
                 1, fine);
 
         float[] best = fine[0] > coarseBest[0] ? fine : coarseBest;
-        // Threshold lowered from 0.50 to 0.40: on a measured live frame the cue
-        // ball scored 0.44 while partly shadowed, so the old gate dropped it and
-        // the cue/aim/target all vanished for a frame - the visible flicker.
-        if (best[0] < 0.40f) return;   // no cue ball on this frame
+        // Threshold lowered from 0.40 to 0.28: prevents dropping the cue ball during
+        // stick pullback, shadow, or animation pulse.
+        if (best[0] < 0.28f) return;   // no cue ball on this frame
         out.cue = new Ball((int) best[1] + ix0, (int) best[2] + iy0, radius);
     }
 

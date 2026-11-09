@@ -182,7 +182,7 @@ class GuideOverlay {
         private float lastStubTipX = Float.NaN;
         private float lastStubTipY = Float.NaN;
         private Detector.Ball lastTarget = null;
-        private static final int AIM_HOLD = 14;
+        private static final int AIM_HOLD = 60;
         private int holdCounter;
         private Detector.Result heldResult;
 
@@ -217,68 +217,81 @@ class GuideOverlay {
                 return;
             }
 
+            Detector.Result r = null;
             Detector.Result raw = last;
             if (raw == null || !raw.tableFound) {
-                heldResult  = null;
-                holdCounter = 0;
-                smoothAimAngle = Float.NaN;
-                smoothTargetAngle = Float.NaN;
-                lastTarget = null;
-                return;
+                if (holdCounter > 0) {
+                    holdCounter--;
+                    r = heldResult;
+                } else {
+                    heldResult  = null;
+                    smoothAimAngle = Float.NaN;
+                    smoothTargetAngle = Float.NaN;
+                    lastTarget = null;
+                    return;
+                }
             }
 
             // --- Aim smoothing + hold ---
-            Detector.Result r = null;
-            if (raw.aimFound && raw.cue != null && !Float.isNaN(raw.aimAngle)) {
-                if (!Float.isNaN(smoothAimAngle)) {
-                    float delta = angleDelta(raw.aimAngle, smoothAimAngle);
-                    smoothAimAngle += delta * (Math.abs(delta) < 0.12f ? 0.4f : 1f);
-                } else {
-                    smoothAimAngle = raw.aimAngle;
-                }
-                Detector.Result copy = raw.copy();
-                copy.aimAngle = smoothAimAngle;
-
-                // Target angle smoothing & stability filter:
-                if (copy.aimTarget != null && !Float.isNaN(copy.targetAngle)) {
-                    if (!Float.isNaN(smoothTargetAngle)) {
-                        float dTarget = angleDelta(copy.targetAngle, smoothTargetAngle);
-                        // If target jumps wildly (> 20 deg) while cue is stationary, reject the jitter
-                        if (Math.abs(dTarget) > 0.35f) {
-                            copy.targetAngle = smoothTargetAngle;
-                            copy.stubTipX = lastStubTipX;
-                            copy.stubTipY = lastStubTipY;
+            if (raw != null && raw.tableFound) {
+                if (raw.aimFound && raw.cue != null && !Float.isNaN(raw.aimAngle)) {
+                    if (!Float.isNaN(smoothAimAngle)) {
+                        float delta = angleDelta(raw.aimAngle, smoothAimAngle);
+                        // Micro deadband (< 0.17 deg) prevents line jitter when cue is stationary
+                        if (Math.abs(delta) < 0.003f) {
+                            // perfectly static
+                        } else if (Math.abs(delta) < 0.12f) {
+                            smoothAimAngle += delta * 0.35f;
                         } else {
-                            smoothTargetAngle += dTarget * 0.40f;
-                            copy.targetAngle = smoothTargetAngle;
+                            smoothAimAngle = raw.aimAngle;
+                        }
+                    } else {
+                        smoothAimAngle = raw.aimAngle;
+                    }
+                    Detector.Result copy = raw.copy();
+                    copy.aimAngle = smoothAimAngle;
+
+                    // Target angle smoothing & stability filter:
+                    if (copy.aimTarget != null && !Float.isNaN(copy.targetAngle)) {
+                        if (!Float.isNaN(smoothTargetAngle)) {
+                            float dTarget = angleDelta(copy.targetAngle, smoothTargetAngle);
+                            // If target jumps wildly (> 20 deg) while cue is stationary, reject the jitter
+                            if (Math.abs(dTarget) > 0.35f) {
+                                copy.targetAngle = smoothTargetAngle;
+                                copy.stubTipX = lastStubTipX;
+                                copy.stubTipY = lastStubTipY;
+                            } else {
+                                smoothTargetAngle += dTarget * 0.40f;
+                                copy.targetAngle = smoothTargetAngle;
+                                lastStubTipX = copy.stubTipX;
+                                lastStubTipY = copy.stubTipY;
+                            }
+                        } else {
+                            smoothTargetAngle = copy.targetAngle;
                             lastStubTipX = copy.stubTipX;
                             lastStubTipY = copy.stubTipY;
                         }
-                    } else {
-                        smoothTargetAngle = copy.targetAngle;
-                        lastStubTipX = copy.stubTipX;
-                        lastStubTipY = copy.stubTipY;
+                        lastTarget = copy.aimTarget;
+                    } else if (lastTarget != null && !Float.isNaN(smoothTargetAngle)) {
+                        // Momentary pulse: hold the last good target ball rather than dropping it
+                        copy.aimTarget = lastTarget;
+                        copy.targetAngle = smoothTargetAngle;
+                        copy.stubTipX = lastStubTipX;
+                        copy.stubTipY = lastStubTipY;
                     }
-                    lastTarget = copy.aimTarget;
-                } else if (lastTarget != null && !Float.isNaN(smoothTargetAngle)) {
-                    // Momentary pulse: hold the last good target ball rather than dropping it
-                    copy.aimTarget = lastTarget;
-                    copy.targetAngle = smoothTargetAngle;
-                    copy.stubTipX = lastStubTipX;
-                    copy.stubTipY = lastStubTipY;
-                }
 
-                heldResult  = copy;
-                holdCounter = AIM_HOLD;
-                r = heldResult;
-            } else if (holdCounter > 0) {
-                holdCounter--;
-                r = heldResult;
-            } else {
-                smoothAimAngle = Float.NaN;
-                smoothTargetAngle = Float.NaN;
-                lastTarget = null;
-                heldResult  = null;
+                    heldResult  = copy;
+                    holdCounter = AIM_HOLD;
+                    r = heldResult;
+                } else if (holdCounter > 0) {
+                    holdCounter--;
+                    r = heldResult;
+                } else {
+                    smoothAimAngle = Float.NaN;
+                    smoothTargetAngle = Float.NaN;
+                    lastTarget = null;
+                    heldResult  = null;
+                }
             }
 
             if (r == null || !r.aimFound) return;
@@ -335,9 +348,10 @@ class GuideOverlay {
                 drawAndMaskCircle(c, linePaint, ghostX, ghostY, cueR * 0.8f);
             }
 
-            // YELLOW
-            if (showYellow && hasTarget) {
-                drawYellowLine(c, r, ghostX, ghostY, cueR, tL, tT, tR, tB);
+            // YELLOW - primary aim line, always present across all parts of table
+            if (showYellow) {
+                drawYellowLine(c, r, cueX, cueY, ghostX, ghostY, cueR, aimDx, aimDy,
+                        hasGhost, hasTarget, tL, tT, tR, tB);
             }
 
             // CYAN after-contact
@@ -402,58 +416,77 @@ class GuideOverlay {
         // ---------------------------------------------------------------- YELLOW
 
         /**
-         * YELLOW = target ball path.
+         * YELLOW = primary aim & trajectory line.
          *
-         * Direction: ghost → target (line of centers, pure billiard physics).
-         * Start:     far edge of target ball (facing away from ghost).
-         *
-         * No stub-fitting. No ghost-ball ring scan. Pure geometry.
-         * This is always correct if the ghost/target detection is correct.
+         * Consistently displays across all parts of the table:
+         * 1) Target ball hit: extends the target ball trajectory from the game stub tip
+         *    (or target ball edge) bouncing off cushions with ball radius cushion inset.
+         * 2) Ghost ball hit (faint stub): extends along the aim direction ahead of ghost ball.
+         * 3) Kick shot (no object ball): traces the cue ball path folding off cushions.
          */
         private void drawYellowLine(Canvas c, Detector.Result r,
+                                    float cueX, float cueY,
                                     float ghostX, float ghostY, float cueR,
+                                    float aimDx, float aimDy,
+                                    boolean hasGhost, boolean hasTarget,
                                     float tL, float tT, float tR, float tB) {
-            if (r.aimTarget == null) return;
-
-            final float tx   = vx(r.aimTarget.x);
-            final float ty   = vy(r.aimTarget.y);
-            final float tRad = Math.max(cueR * 0.8f, vLen(r.aimTarget.radius));
-
-            final float ang;
             final float startX;
             final float startY;
+            final float ang;
+            float tx = Float.NaN;
+            float ty = Float.NaN;
+            float tRad = cueR;
 
-            if (!Float.isNaN(r.stubTipX) && !Float.isNaN(r.stubTipY) && !Float.isNaN(r.targetAngle)) {
-                // Seamless extension: start directly at the tip of the game's own white stub!
-                startX = vx(r.stubTipX);
-                startY = vy(r.stubTipY);
-                ang = r.targetAngle;
+            if (hasTarget && r.aimTarget != null) {
+                tx   = vx(r.aimTarget.x);
+                ty   = vy(r.aimTarget.y);
+                tRad = Math.max(cueR * 0.8f, vLen(r.aimTarget.radius));
+
+                if (!Float.isNaN(r.stubTipX) && !Float.isNaN(r.stubTipY) && !Float.isNaN(r.targetAngle)) {
+                    // Seamless extension: start directly at the tip of the game's own white stub!
+                    startX = vx(r.stubTipX);
+                    startY = vy(r.stubTipY);
+                    ang = r.targetAngle;
+                } else {
+                    float dx = tx - ghostX;
+                    float dy = ty - ghostY;
+                    float d  = (float) Math.hypot(dx, dy);
+                    if (d < 2f) {
+                        dx = aimDx;
+                        dy = aimDy;
+                    } else {
+                        dx /= d;
+                        dy /= d;
+                    }
+                    ang = !Float.isNaN(r.targetAngle) ? r.targetAngle : (float) Math.atan2(dy, dx);
+                    startX = tx + dx * tRad;
+                    startY = ty + dy * tRad;
+                }
+            } else if (hasGhost) {
+                // Ghost ball detected but target stub was faint/unsegmented:
+                // Target ball lies directly in front of ghost ball along aim direction
+                tx = ghostX + aimDx * (cueR * 2f);
+                ty = ghostY + aimDy * (cueR * 2f);
+                startX = tx + aimDx * cueR;
+                startY = ty + aimDy * cueR;
+                ang = r.aimAngle;
             } else {
-                // Direction ghost → target fallback
-                float dx = tx - ghostX;
-                float dy = ty - ghostY;
-                float d  = (float) Math.hypot(dx, dy);
-                if (d < 2f) return;
-                dx /= d;
-                dy /= d;
-                ang = !Float.isNaN(r.targetAngle) ? r.targetAngle : (float) Math.atan2(dy, dx);
-                startX = tx + dx * tRad;
-                startY = ty + dy * tRad;
+                // Kick shot (no object ball): start at cue ball and fold off cushions!
+                startX = cueX;
+                startY = cueY;
+                ang = r.aimAngle;
             }
 
-            // Log for diagnostics
-            Log.d(TAG, String.format("yellow: ghost(%.0f,%.0f) tgt(%.0f,%.0f) start(%.0f,%.0f) ang=%.1fdeg",
-                    ghostX, ghostY, tx, ty, startX, startY,
-                    Math.toDegrees(ang)));
-
-            int n = runAndPaint(c, linePaint, objSegs, startX, startY, ang, 0f,
+            int n = runAndPaint(c, linePaint, objSegs, startX, startY, ang, cueR,
                     tL, tT, tR, tB, 0xFFFFC020, thickAim ? OBJ_W_THICK : OBJ_W, bankCount);
 
             drawArrowHead(c, n);
 
-            // Small dot at target ball center
-            dotPaint.setColor(0xFFFFC020);
-            c.drawCircle(tx, ty, Math.max(5f, tRad * 0.25f), dotPaint);
+            // Small dot at target ball center if target exists
+            if (!Float.isNaN(tx) && !Float.isNaN(ty)) {
+                dotPaint.setColor(0xFFFFC020);
+                c.drawCircle(tx, ty, Math.max(5f, tRad * 0.25f), dotPaint);
+            }
         }
 
         // ---------------------------------------------------------------- CYAN

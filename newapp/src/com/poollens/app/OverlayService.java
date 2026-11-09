@@ -385,7 +385,7 @@ public class OverlayService extends Service implements CaptureEngine.Frames {
                 // can jump tens of degrees between frames. At 14 Hz a real drag
                 // never sweeps that far, so treat a big jump as a mis-detection
                 // unless the new line scores clearly better.
-                boolean prevRecent = lastAimMs != 0 && t - lastAimMs < 1200
+                boolean prevRecent = lastAimMs != 0 && t - lastAimMs < 2000
                         && lastCue != null && r.cue != null
                         && Math.hypot(r.cue.x - lastCue.x, r.cue.y - lastCue.y) < 60;
                 if (prevRecent) {
@@ -428,22 +428,25 @@ public class OverlayService extends Service implements CaptureEngine.Frames {
                     r.stubTipY = lastStubTipY;
                     r.cueReboundAngle = lastCueReboundAngle;
                 }
-            } else if (lastAimMs != 0 && t - lastAimMs < 1200 && lastCue != null
-                    && r.cue != null
-                    && Math.hypot(r.cue.x - lastCue.x, r.cue.y - lastCue.y) < 60) {
-                // Reuse the recent angle rather than blinking the aim off for
-                // a frame while the game's guideline pulses.
-                r.aimAngle = lastAimAngle;
-                r.aimScore = lastAimScore;
-                r.aimFound = true;
-                if (lastAimTarget != null) {
-                    r.aimTarget = lastAimTarget;
-                    r.targetAngle = lastTargetAngle;
-                    r.ghostX = lastGhostX;
-                    r.ghostY = lastGhostY;
-                    r.stubTipX = lastStubTipX;
-                    r.stubTipY = lastStubTipY;
-                    r.cueReboundAngle = lastCueReboundAngle;
+            } else if (lastAimMs != 0 && t - lastAimMs < 2000 && lastCue != null) {
+                // If cue was momentarily missed (e.g. shadowed or during cue animation), restore last cue
+                if (r.cue == null) {
+                    r.cue = lastCue;
+                }
+                if (Math.hypot(r.cue.x - lastCue.x, r.cue.y - lastCue.y) < 60) {
+                    // Reuse the recent angle and target rather than blinking off
+                    r.aimAngle = lastAimAngle;
+                    r.aimScore = lastAimScore;
+                    r.aimFound = true;
+                    if (lastAimTarget != null) {
+                        r.aimTarget = lastAimTarget;
+                        r.targetAngle = lastTargetAngle;
+                        r.ghostX = lastGhostX;
+                        r.ghostY = lastGhostY;
+                        r.stubTipX = lastStubTipX;
+                        r.stubTipY = lastStubTipY;
+                        r.cueReboundAngle = lastCueReboundAngle;
+                    }
                 }
             }
             if (r.cue != null) lastCue = r.cue;
